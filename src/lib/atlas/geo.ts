@@ -1,7 +1,5 @@
 import { geoCentroid, geoContains, geoEquirectangular, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
-import type { Role } from "./model";
-import { COMMIT, THRESHOLD } from "./model";
 
 export const DR = Math.PI / 180;
 
@@ -84,90 +82,33 @@ export function centroidOf(c: CountryFeat): LL {
   return { lat, lon };
 }
 
-function lerp(a: number, b: number, t: number) {
-  return a + (b - a) * t;
-}
-function hexToRgb(h: string): [number, number, number] {
-  const n = parseInt(h.replace("#", ""), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-const ATK = hexToRgb("#ff4d5e");
-const DEF = hexToRgb("#4c8dff");
-const NEU = hexToRgb("#22263b");
-
-function ramp(score: number): [number, number, number] {
-  const t = Math.max(-1, Math.min(1, score / THRESHOLD));
-  if (t >= 0) {
-    const k = t;
-    return [
-      lerp(NEU[0], DEF[0], k),
-      lerp(NEU[1], DEF[1], k),
-      lerp(NEU[2], DEF[2], k),
-    ];
-  }
-  const k = -t;
-  return [
-    lerp(NEU[0], ATK[0], k),
-    lerp(NEU[1], ATK[1], k),
-    lerp(NEU[2], ATK[2], k),
-  ];
-}
-
 export const OVERLAY_W = 2048;
 export const OVERLAY_H = 1024;
 
+/** Gold selection wash only — no cascade / role fill. */
 export function paintAtlas(
   ctx: CanvasRenderingContext2D,
   countries: CountryFeat[],
-  scores: Record<string, number>,
-  roles: Record<string, Role>,
   selected: string | null,
 ) {
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
   ctx.clearRect(0, 0, w, h);
+  if (!selected) return;
+  const c = countries.find((x) => x.name === selected);
+  if (!c) return;
   const projection = geoEquirectangular()
     .scale(w / (2 * Math.PI))
     .translate([w / 2, h / 2])
     .precision(0.3);
   const path = geoPath(projection, ctx);
-
-  for (const c of countries) {
-    const role = roles[c.name];
-    const s = scores[c.name] ?? 0;
-    let rgb: [number, number, number] | null = null;
-    let a = 0;
-    if (role === "neutral") {
-      rgb = [28, 32, 48];
-      a = 0.55;
-    } else if (role === "defender") {
-      rgb = DEF;
-      a = 0.72;
-    } else if (role === "attacker") {
-      rgb = ATK;
-      a = 0.72;
-    } else if (Math.abs(s) > 0.6) {
-      rgb = ramp(s);
-      a = 0.18 + 0.5 * Math.min(1, Math.abs(s) / COMMIT);
-    }
-    if (!rgb) continue;
-    ctx.beginPath();
-    path(c.feature);
-    ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
-    ctx.fill();
-  }
-
-  if (selected) {
-    const c = countries.find((x) => x.name === selected);
-    if (c) {
-      ctx.beginPath();
-      path(c.feature);
-      ctx.strokeStyle = "rgba(200,144,80,0.95)";
-      ctx.lineWidth = 1.8;
-      ctx.stroke();
-    }
-  }
+  ctx.beginPath();
+  path(c.feature);
+  ctx.fillStyle = "rgba(200,144,80,0.28)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(200,144,80,0.95)";
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
 }
 
 export function ringsOf(geom: GeoJSON.Geometry): number[][][] {

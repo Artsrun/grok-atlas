@@ -20,7 +20,7 @@ export function BootScreen({
         </p>
       ) : (
         <p className="max-w-xs font-mono text-2xs leading-relaxed tracking-wide text-dimmer">
-          Terrarium limb · city lights · cascade overlay · ISS cupola
+          City lights · airglow limb · ISS cupola · v2.0
         </p>
       )}
     </div>

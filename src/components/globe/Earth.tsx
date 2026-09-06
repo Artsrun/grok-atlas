@@ -49,7 +49,7 @@ export function Earth({
       uAtlas: { value: atlasTex },
       uSun: { value: new THREE.Vector3(1, 0.2, 0) },
       uCamPos: { value: new THREE.Vector3(0, 0, 3) },
-      uAtlasMix: { value: 0.42 },
+      uAtlasMix: { value: 1 },
       uNightGain: { value: 1.85 },
       uBump: { value: 1.15 },
     }),
@@ -90,7 +90,6 @@ export function Earth({
     const xyz = ll2xyz(decl, s.sunLon, 1);
     sunVec.set(xyz[0], xyz[1], xyz[2]);
     const bump = s.bump;
-    const mix = s.atlasMix;
     const ng = s.nightGain;
     const op = s.cloudOpacity;
 
@@ -100,7 +99,7 @@ export function Earth({
     };
     if (earthMat.current) {
       apply(earthMat.current.uniforms as never);
-      earthMat.current.uniforms.uAtlasMix.value = mix;
+      earthMat.current.uniforms.uAtlasMix.value = 1;
       earthMat.current.uniforms.uNightGain.value = ng;
       earthMat.current.uniforms.uBump.value = bump;
     }

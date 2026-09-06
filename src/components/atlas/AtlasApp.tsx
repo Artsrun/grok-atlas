@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CountryFeat } from "@/lib/atlas/geo";
-import { loadCountries } from "@/lib/atlas/geo";
-import type { Role } from "@/lib/atlas/model";
+import { centroidOf, loadCountries } from "@/lib/atlas/geo";
+import { VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { GlobeCanvas } from "@/components/globe/GlobeCanvas";
 import { BootScreen } from "./BootScreen";
@@ -20,20 +20,18 @@ export function AtlasApp() {
         setCountries(c);
         useAtlas.getState().setNames(c.map((x) => x.name));
         const p = new URLSearchParams(location.search);
-        const set = (k: string, r: Role) => {
-          const names = new Set(c.map((x) => x.name));
-          (p.get(k) || "")
-            .split("|")
-            .filter(Boolean)
-            .forEach((n) => {
-              if (names.has(n)) useAtlas.getState().setRole(n, r);
-            });
-        };
-        if (p.has("d") || p.has("a")) {
-          useAtlas.getState().clear();
-          set("d", "defender");
-          set("a", "attacker");
-          set("n", "neutral");
+        const site = p.get("site");
+        const country = p.get("c");
+        if (site) {
+          const v = VIEWS.find((x) => x.id === site);
+          if (v) useAtlas.getState().flyTo({ lat: v.lat, lon: v.lon, label: v.label });
+        } else if (country) {
+          const hit = c.find((x) => x.name.toLowerCase() === country.toLowerCase());
+          if (hit) {
+            const ll = centroidOf(hit);
+            useAtlas.getState().select(hit.name);
+            useAtlas.getState().flyTo({ ...ll, label: hit.name });
+          }
         }
       })
       .catch((e: unknown) => {
@@ -48,15 +46,15 @@ export function AtlasApp() {
     return (
       <BootScreen
         label="Topology unreachable"
-        detail={`${err} — globe will still run if textures load; cascade overlay is ABSENT.`}
+        detail={`${err} — globe still runs if textures load; country pick is ABSENT.`}
       />
     );
   }
   if (!countries) {
     return (
       <BootScreen
-        label="Acquiring world topology"
-        detail="Natural Earth 110m · NASA city lights · ISS cupola night limb"
+        label="Acquiring earth"
+        detail="NASA city lights · Natural Earth 110m · ISS cupola night limb"
       />
     );
   }

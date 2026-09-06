@@ -42,7 +42,7 @@ export function SitePins() {
     () => [
       { ...NILE, color: "#c89050", r: 0.011 },
       { ...OBS, color: "#e6e8f4", r: 0.01 },
-      { ...ARARAT, color: "#ff4d5e", r: 0.01 },
+      { ...ARARAT, color: "#b05a32", r: 0.01 },
     ],
     [],
   );
@@ -105,7 +105,7 @@ export function Station() {
   useFrame((_, dt) => {
     if (!ref.current || !show) return;
     const d = Math.min(dt, 0.1);
-    t.current += d * 0.22;
+    t.current += d * 0.11;
     const inc = (51.6 * Math.PI) / 180;
     const r = 1.22;
     const u = t.current;

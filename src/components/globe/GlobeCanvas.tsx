@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { CountryFeat } from "@/lib/atlas/geo";
 import {
+  centroidOf,
   ll2xyz,
   NILE,
   OVERLAY_H,
@@ -19,6 +20,7 @@ import { Cage, SitePins, Starfield, Station, SunMarker } from "./Extras";
 
 const HOME_DIST = 2.48;
 const HOME_POS = ll2xyz(NILE.lat, NILE.lon, HOME_DIST);
+const FLY_SEC = 1.35;
 
 function OverlayTexture({
   countries,
@@ -27,50 +29,91 @@ function OverlayTexture({
   countries: CountryFeat[];
   texture: THREE.CanvasTexture;
 }) {
-  const scores = useAtlas((s) => s.scores);
-  const roles = useAtlas((s) => s.roles);
   const selected = useAtlas((s) => s.selected);
 
   useEffect(() => {
     const ctx = texture.image.getContext("2d") as CanvasRenderingContext2D | null;
     if (!ctx) return;
-    paintAtlas(ctx, countries, scores, roles, selected);
+    paintAtlas(ctx, countries, selected);
     texture.needsUpdate = true;
-  }, [countries, scores, roles, selected, texture]);
+  }, [countries, selected, texture]);
   return null;
 }
 
+function slerpDir(
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  t: number,
+  out: THREE.Vector3,
+  ra: number,
+  rb: number,
+) {
+  const dot = THREE.MathUtils.clamp(a.dot(b), -1, 1);
+  const omega = Math.acos(dot);
+  const r = THREE.MathUtils.lerp(ra, rb, t);
+  if (omega < 1e-4) {
+    out.copy(a).lerp(b, t).setLength(r);
+    return;
+  }
+  const so = Math.sin(omega);
+  out
+    .copy(a)
+    .multiplyScalar(Math.sin((1 - t) * omega) / so)
+    .addScaledVector(b, Math.sin(t * omega) / so)
+    .setLength(r);
+}
+
 function Rig() {
-  const controls = useRef<THREE.EventDispatcher & {
+  const controls = useRef<{
     target: THREE.Vector3;
     autoRotate: boolean;
     enabled: boolean;
     update: () => void;
-  }>(null);
+  } | null>(null);
   const { camera } = useThree();
   const autoRotate = useAtlas((s) => s.autoRotate);
   const tiltOn = useAtlas((s) => s.tiltOn);
   const focus = useAtlas((s) => s.focus);
-  const flying = useRef(true);
-  const dist = useRef(HOME_DIST);
+
+  const fromDir = useRef(new THREE.Vector3());
+  const toDir = useRef(new THREE.Vector3());
+  const tmp = useRef(new THREE.Vector3());
+  const fromR = useRef(HOME_DIST);
+  const toR = useRef(HOME_DIST);
+  const flyT = useRef(1);
 
   useEffect(() => {
-    flying.current = true;
-  }, [focus?.lat, focus?.lon]);
+    if (!focus) return;
+    toDir.current.set(...ll2xyz(focus.lat, focus.lon, 1)).normalize();
+    const here = camera.position;
+    const already =
+      Math.abs(here.x / here.length() - toDir.current.x) < 0.012 &&
+      Math.abs(here.z / here.length() - toDir.current.z) < 0.012;
+    if (already) {
+      flyT.current = 1;
+      return;
+    }
+    fromDir.current.copy(here).normalize();
+    fromR.current = here.length();
+    toR.current = fromR.current;
+    flyT.current = 0;
+  }, [focus?.lat, focus?.lon, camera, focus]);
 
   useFrame((_, dt) => {
-    const d = Math.min(dt, 0.1);
+    const d = Math.min(dt, 0.05);
     useAtlas.getState().tickSun(d);
     const st = useAtlas.getState();
     const c = controls.current;
-    if (st.focus && flying.current && c) {
-      const target = new THREE.Vector3(...ll2xyz(st.focus.lat, st.focus.lon, dist.current));
-      camera.position.lerp(target, 1 - Math.pow(0.08, d * 60));
-      c.target.set(0, 0, 0);
-      if (camera.position.distanceTo(target) < 0.05) flying.current = false;
+    const flying = flyT.current < 1;
+    if (flying) {
+      flyT.current = Math.min(1, flyT.current + d / FLY_SEC);
+      const ease = 1 - Math.pow(1 - flyT.current, 3);
+      slerpDir(fromDir.current, toDir.current, ease, tmp.current, fromR.current, toR.current);
+      camera.position.copy(tmp.current);
+      if (c) c.target.set(0, 0, 0);
     }
     if (c) {
-      c.autoRotate = st.autoRotate && !st.tiltOn && !flying.current;
+      c.autoRotate = st.autoRotate && !st.tiltOn && !flying;
       c.enabled = !st.tiltOn;
     }
   });
@@ -80,12 +123,16 @@ function Rig() {
       ref={controls as never}
       enablePan={false}
       enableDamping
-      dampingFactor={0.08}
+      dampingFactor={0.065}
       minDistance={1.42}
       maxDistance={7.5}
       autoRotate={autoRotate && !tiltOn}
-      autoRotateSpeed={0.12}
-      rotateSpeed={0.55}
+      autoRotateSpeed={0.07}
+      rotateSpeed={0.48}
+      zoomSpeed={0.7}
+      onStart={() => {
+        flyT.current = 1;
+      }}
     />
   );
 }
@@ -114,7 +161,14 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
       if (!hit?.point) return;
       const { lat, lon } = xyz2ll(hit.point.x, hit.point.y, hit.point.z);
       const name = pickCountry(countries, lat, lon);
-      if (name) useAtlas.getState().cycle(name);
+      const st = useAtlas.getState();
+      if (!name) {
+        st.select(null);
+        return;
+      }
+      st.select(name);
+      const c = countries.find((x) => x.name === name);
+      if (c) st.flyTo({ ...centroidOf(c), label: name });
     };
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointerup", up);
@@ -157,7 +211,7 @@ function TiltBridge() {
 
   useFrame(() => {
     if (!tiltOn) return;
-    camera.quaternion.slerp(target.current, 0.14);
+    camera.quaternion.slerp(target.current, 0.12);
   });
   return null;
 }
