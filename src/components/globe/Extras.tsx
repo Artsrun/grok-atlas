@@ -1,8 +1,11 @@
 import { useFrame } from "@react-three/fiber";
+import { useTexture } from "@react-three/drei";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ARARAT, ll2xyz, NILE, OBS } from "@/lib/atlas/geo";
+import { MOON_DIST, MOON_INC, MOON_RADIUS, moonXYZ } from "@/lib/atlas/tide";
 import { useAtlas } from "@/lib/atlas/store";
+import { MOON_FRAG, MOON_VERT } from "./shaders";
 
 export function Starfield({ count = 2600 }: { count?: number }) {
   const geo = useMemo(() => {
@@ -148,6 +151,80 @@ export function Station() {
             emissive="#4c8dff"
             emissiveIntensity={0.35}
             roughness={0.3}
+          />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
+export function Luna() {
+  const show = useAtlas((s) => s.showMoon);
+  const map = useTexture("/earth/moon.jpg");
+  const group = useRef<THREE.Group>(null);
+  const mat = useRef<THREE.ShaderMaterial>(null);
+  const sunVec = useMemo(() => new THREE.Vector3(), []);
+
+  const orbit = useMemo(() => {
+    const n = 220;
+    const arr = new Float32Array(n * 3);
+    const inc = (MOON_INC * Math.PI) / 180;
+    for (let i = 0; i < n; i++) {
+      const u = (i / n) * Math.PI * 2;
+      arr[i * 3] = MOON_DIST * Math.cos(u);
+      arr[i * 3 + 1] = MOON_DIST * Math.sin(u) * Math.sin(inc);
+      arr[i * 3 + 2] = MOON_DIST * Math.sin(u) * Math.cos(inc);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+    return g;
+  }, []);
+
+  const uniforms = useMemo(
+    () => ({
+      uMap: { value: map },
+      uSun: { value: new THREE.Vector3(1, 0.2, 0) },
+    }),
+    [map],
+  );
+
+  useFrame(() => {
+    if (!show) return;
+    const s = useAtlas.getState();
+    const p = moonXYZ(s.moonLon);
+    if (group.current) {
+      group.current.position.set(p[0], p[1], p[2]);
+      group.current.lookAt(0, 0, 0);
+    }
+    const sun = ll2xyz(8, s.sunLon, 1);
+    sunVec.set(sun[0], sun[1], sun[2]);
+    if (mat.current) mat.current.uniforms.uSun.value.copy(sunVec);
+  });
+
+  if (!show) return null;
+  return (
+    <group>
+      <lineLoop geometry={orbit}>
+        <lineBasicMaterial color="#d4c5a3" transparent opacity={0.22} />
+      </lineLoop>
+      <group ref={group}>
+        <mesh scale={1.18} renderOrder={1}>
+          <sphereGeometry args={[MOON_RADIUS, 24, 16]} />
+          <meshBasicMaterial
+            color="#d4c5a3"
+            transparent
+            opacity={0.18}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+          />
+        </mesh>
+        <mesh>
+          <sphereGeometry args={[MOON_RADIUS, 48, 32]} />
+          <shaderMaterial
+            ref={mat}
+            vertexShader={MOON_VERT}
+            fragmentShader={MOON_FRAG}
+            uniforms={uniforms}
           />
         </mesh>
       </group>

@@ -8,8 +8,8 @@ Home camera is the Nile Delta / Eastern Mediterranean — the cupola night-limb 
 
 - **Orbit** — drag. Pinch / wheel to zoom
 - **Country** — tap to inspect and fly to centroid
-- **Views** — Nile Delta, Yerevan, Ararat, Europe, Americas, West Pacific
-- **Layers** — atmosphere, clouds, borders, cage, ISS, cupola vignette, auto-sun, auto-rotate
+- **Views** — Nile Delta, Yerevan, Ararat, Europe, Americas, West Pacific, Lunar stand
+- **Layers** — atmosphere, clouds, borders, cage, ISS, moon, tides, cupola vignette, auto-sun, auto-moon, auto-rotate
 - **Device tilt** — optional gyroscope on the rig (phone)
 - **Share** — copies `?c=Armenia` or `?site=nile`
 

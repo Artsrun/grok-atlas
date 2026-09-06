@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { centroidOf, type CountryFeat } from "@/lib/atlas/geo";
+import { centroidOf, NILE, type CountryFeat } from "@/lib/atlas/geo";
 import { VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
+import { springLabel, tideAt, tideMeters } from "@/lib/atlas/tide";
 
 function Tag({
   kind,
@@ -38,8 +39,11 @@ function LayerToggle({
     | "showBorders"
     | "showCage"
     | "showIss"
+    | "showMoon"
+    | "showTides"
     | "cupola"
     | "autoSun"
+    | "autoMoon"
     | "autoRotate";
   label: string;
   on: boolean;
@@ -80,15 +84,20 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
   const nightGain = useAtlas((s) => s.nightGain);
   const bump = useAtlas((s) => s.bump);
   const sunLon = useAtlas((s) => s.sunLon);
+  const moonLon = useAtlas((s) => s.moonLon);
+  const tideGain = useAtlas((s) => s.tideGain);
   const panelOpen = useAtlas((s) => s.panelOpen);
   const cupola = useAtlas((s) => s.cupola);
   const autoSun = useAtlas((s) => s.autoSun);
+  const autoMoon = useAtlas((s) => s.autoMoon);
   const autoRotate = useAtlas((s) => s.autoRotate);
   const showAtmosphere = useAtlas((s) => s.showAtmosphere);
   const showClouds = useAtlas((s) => s.showClouds);
   const showBorders = useAtlas((s) => s.showBorders);
   const showCage = useAtlas((s) => s.showCage);
   const showIss = useAtlas((s) => s.showIss);
+  const showMoon = useAtlas((s) => s.showMoon);
+  const showTides = useAtlas((s) => s.showTides);
   const tiltOn = useAtlas((s) => s.tiltOn);
   const [copied, setCopied] = useState(false);
   const [search, setSearch] = useState("");
@@ -116,6 +125,25 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
     useAtlas.getState().select(n);
     useAtlas.getState().flyTo({ ...ll, label: n });
   };
+
+  const gauge = (() => {
+    let lat = NILE.lat;
+    let lon = NILE.lon;
+    let where = "Nile";
+    if (selected) {
+      const c = countries.find((x) => x.name === selected);
+      if (c) {
+        const ll = centroidOf(c);
+        lat = ll.lat;
+        lon = ll.lon;
+        where = selected;
+      }
+    }
+    const raw = tideAt(lat, lon, moonLon, sunLon);
+    const m = tideMeters(raw, showTides ? tideGain : 0);
+    const kind = springLabel(moonLon, sunLon);
+    return { m, kind, where, raw };
+  })();
 
   return (
     <>
@@ -150,6 +178,7 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
           {selected ?? "idle"}
         </span>
         <span className="shrink-0 border-r border-etch px-3 py-1.5">sun {sunLon.toFixed(0)}°</span>
+        <span className="shrink-0 border-r border-etch px-3 py-1.5">moon {moonLon.toFixed(0)}°</span>
         <span className="min-w-0 flex-1 px-3 py-1.5 text-right text-dimmer">
           drag to orbit · scroll zoom · tap a country
         </span>
@@ -165,6 +194,14 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
           airglow limb
         </div>
         <div>
+          <i className="mr-2 inline-block h-1.5 w-1.5 bg-bone" />
+          moon
+        </div>
+        <div>
+          <i className="mr-2 inline-block h-1.5 w-1.5 bg-defender" />
+          high tide
+        </div>
+        <div>
           <i className="mr-2 inline-block h-1.5 w-1.5 bg-silk" />
           Yerevan
         </div>
@@ -174,10 +211,37 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
         </div>
       </div>
 
+      <div className="pointer-events-none absolute bottom-2 left-2 z-20 max-w-[min(280px,46vw)]">
+        <div className="mb-1 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.16em] text-dimmer">
+          <span>Tide · {gauge.where}</span>
+          <b className="font-medium text-ochre">{gauge.kind}</b>
+        </div>
+        <div
+          className={`font-mono text-xl tabular-nums ${gauge.m >= 0 ? "text-defender" : "text-rust"}`}
+        >
+          {gauge.m >= 0 ? "+" : ""}
+          {gauge.m.toFixed(2)}
+          <span className="ml-1 text-2xs text-dimmer">m</span>
+        </div>
+        <div className="relative mt-1 h-1 bg-etch">
+          <i
+            className={`absolute top-0 bottom-0 ${gauge.m >= 0 ? "bg-defender" : "bg-rust"}`}
+            style={{
+              width: `${Math.min(50, (Math.abs(gauge.raw) / 1.5) * 50)}%`,
+              left: gauge.raw >= 0 ? "50%" : `${50 - Math.min(50, (Math.abs(gauge.raw) / 1.5) * 50)}%`,
+            }}
+          />
+          <i className="absolute left-1/2 top-[-3px] h-2.5 w-px bg-silk" />
+        </div>
+        <div className="mt-1 font-mono text-2xs uppercase tracking-wide text-dimmer">
+          lunar P2 + 0.46 solar · <Tag kind="x">declared</Tag>
+        </div>
+      </div>
+
       <div className="pointer-events-none absolute bottom-2 right-2 z-20 hidden text-right font-mono text-2xs leading-5 tracking-wide text-dimmer sm:block">
         textures <span className="text-lichen">MEASURED</span>
         <br />
-        night gain <span className="text-rust">DECLARED</span> · relief not to scale
+        moon range <span className="text-rust">DECLARED</span> · 2.72 R⊕ (real ~60)
         <br />
         ISS inclination 51.6° · Nile cupola home
       </div>
@@ -227,7 +291,12 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
                 className="flex min-h-11 items-center justify-between border border-etch px-2 text-left"
                 onClick={() => {
                   useAtlas.getState().select(null);
-                  useAtlas.getState().flyTo({ lat: s.lat, lon: s.lon, label: s.label });
+                  useAtlas.getState().flyTo({
+                    lat: s.lat,
+                    lon: s.lon,
+                    label: s.label,
+                    dist: s.dist,
+                  });
                 }}
               >
                 <span className="font-mono text-xs text-silk">{s.label}</span>
@@ -317,14 +386,43 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
               useAtlas.getState().setSunLon(+e.target.value);
             }}
           />
+          <label className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer">
+            Moon longitude{" "}
+            <b className="float-right font-medium text-ochre">{moonLon.toFixed(0)}°</b>
+          </label>
+          <input
+            className="inst"
+            type="range"
+            min={0}
+            max={359}
+            value={Math.round((moonLon + 360) % 360)}
+            onChange={(e) => {
+              useAtlas.getState().setAutoMoon(false);
+              useAtlas.getState().setMoonLon(+e.target.value);
+            }}
+          />
+          <label className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer">
+            Tide gain <b className="float-right font-medium text-ochre">×{tideGain.toFixed(2)}</b>
+          </label>
+          <input
+            className="inst"
+            type="range"
+            min={0}
+            max={220}
+            value={Math.round(tideGain * 100)}
+            onChange={(e) => useAtlas.getState().setTideGain(+e.target.value / 100)}
+          />
           <div className="mt-3 grid grid-cols-2 gap-1">
             <LayerToggle id="showAtmosphere" label="atmosphere" on={showAtmosphere} />
             <LayerToggle id="showClouds" label="clouds" on={showClouds} />
             <LayerToggle id="showBorders" label="borders" on={showBorders} />
             <LayerToggle id="showIss" label="ISS" on={showIss} />
+            <LayerToggle id="showMoon" label="moon" on={showMoon} />
+            <LayerToggle id="showTides" label="tides" on={showTides} />
             <LayerToggle id="showCage" label="cage" on={showCage} />
             <LayerToggle id="cupola" label="cupola" on={cupola} />
             <LayerToggle id="autoSun" label="sun drift" on={autoSun} />
+            <LayerToggle id="autoMoon" label="moon drift" on={autoMoon} />
             <LayerToggle id="autoRotate" label="orbit" on={autoRotate} />
           </div>
         </section>

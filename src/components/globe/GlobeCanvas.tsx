@@ -16,11 +16,11 @@ import {
 import { useAtlas } from "@/lib/atlas/store";
 import { Earth } from "./Earth";
 import { Borders } from "./Borders";
-import { Cage, SitePins, Starfield, Station, SunMarker } from "./Extras";
+import { Cage, Luna, SitePins, Starfield, Station, SunMarker } from "./Extras";
 
-const HOME_DIST = 2.48;
+const HOME_DIST = 2.58;
 const HOME_POS = ll2xyz(NILE.lat, NILE.lon, HOME_DIST);
-const FLY_SEC = 1.35;
+const FLY_SEC = 1.45;
 
 function OverlayTexture({
   countries,
@@ -86,22 +86,24 @@ function Rig() {
     if (!focus) return;
     toDir.current.set(...ll2xyz(focus.lat, focus.lon, 1)).normalize();
     const here = camera.position;
+    const wantR = focus.dist ?? here.length();
     const already =
       Math.abs(here.x / here.length() - toDir.current.x) < 0.012 &&
-      Math.abs(here.z / here.length() - toDir.current.z) < 0.012;
+      Math.abs(here.z / here.length() - toDir.current.z) < 0.012 &&
+      Math.abs(here.length() - wantR) < 0.04;
     if (already) {
       flyT.current = 1;
       return;
     }
     fromDir.current.copy(here).normalize();
     fromR.current = here.length();
-    toR.current = fromR.current;
+    toR.current = wantR;
     flyT.current = 0;
-  }, [focus?.lat, focus?.lon, camera, focus]);
+  }, [focus?.lat, focus?.lon, focus?.dist, camera]);
 
   useFrame((_, dt) => {
     const d = Math.min(dt, 0.05);
-    useAtlas.getState().tickSun(d);
+    useAtlas.getState().tickOrbits(d);
     const st = useAtlas.getState();
     const c = controls.current;
     const flying = flyT.current < 1;
@@ -125,7 +127,7 @@ function Rig() {
       enableDamping
       dampingFactor={0.065}
       minDistance={1.42}
-      maxDistance={7.5}
+      maxDistance={11}
       autoRotate={autoRotate && !tiltOn}
       autoRotateSpeed={0.07}
       rotateSpeed={0.48}
@@ -229,6 +231,7 @@ function Scene({
       <ambientLight intensity={0.22} />
       <Starfield />
       <SunMarker />
+      <Luna />
       <Earth atlasTex={atlasTex} />
       <Borders countries={countries} />
       <SitePins />
@@ -259,7 +262,7 @@ export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
   return (
     <Canvas
       className="h-full w-full touch-none"
-      camera={{ fov: 42, near: 0.08, far: 220, position: HOME_POS }}
+      camera={{ fov: 52, near: 0.08, far: 220, position: HOME_POS }}
       dpr={[1, 1.75]}
       gl={{
         antialias: true,

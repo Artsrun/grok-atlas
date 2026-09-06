@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useAtlas } from "@/lib/atlas/store";
 import { ll2xyz } from "@/lib/atlas/geo";
+import { moonXYZ } from "@/lib/atlas/tide";
 import { ATMO_FRAG, ATMO_VERT, CLOUD_FRAG, CLOUD_VERT, EARTH_FRAG, EARTH_VERT } from "./shaders";
 
 export function Earth({
@@ -49,9 +50,11 @@ export function Earth({
       uAtlas: { value: atlasTex },
       uSun: { value: new THREE.Vector3(1, 0.2, 0) },
       uCamPos: { value: new THREE.Vector3(0, 0, 3) },
+      uMoon: { value: new THREE.Vector3(-1, 0.1, 0) },
       uAtlasMix: { value: 1 },
       uNightGain: { value: 1.85 },
       uBump: { value: 1.15 },
+      uTideAmp: { value: 1 },
     }),
     [dayMap, nightMap, specMap, normalMap, atlasTex],
   );
@@ -83,15 +86,19 @@ export function Earth({
   );
 
   const sunVec = useMemo(() => new THREE.Vector3(), []);
+  const moonVec = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(({ camera, clock }) => {
     const s = useAtlas.getState();
     const decl = 23.4 * Math.sin((s.sunLon * Math.PI) / 180) * 0.15;
     const xyz = ll2xyz(decl, s.sunLon, 1);
     sunVec.set(xyz[0], xyz[1], xyz[2]);
+    const m = moonXYZ(s.moonLon, 1);
+    moonVec.set(m[0], m[1], m[2]);
     const bump = s.bump;
     const ng = s.nightGain;
     const op = s.cloudOpacity;
+    const tide = s.showTides ? s.tideGain : 0;
 
     const apply = (u: { uSun: { value: THREE.Vector3 }; uCamPos: { value: THREE.Vector3 } }) => {
       u.uSun.value.copy(sunVec);
@@ -102,6 +109,8 @@ export function Earth({
       earthMat.current.uniforms.uAtlasMix.value = 1;
       earthMat.current.uniforms.uNightGain.value = ng;
       earthMat.current.uniforms.uBump.value = bump;
+      earthMat.current.uniforms.uTideAmp.value = tide;
+      earthMat.current.uniforms.uMoon.value.copy(moonVec);
     }
     if (atmoMat.current) apply(atmoMat.current.uniforms as never);
     if (atmoIn.current) apply(atmoIn.current.uniforms as never);

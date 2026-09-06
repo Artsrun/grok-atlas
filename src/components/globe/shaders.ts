@@ -1,14 +1,30 @@
 export const EARTH_VERT = /* glsl */ `
 attribute vec4 tangent;
+uniform sampler2D uSpec;
+uniform vec3 uMoon;
+uniform vec3 uSun;
+uniform float uTideAmp;
 varying vec2 vUv;
 varying vec3 vPos;
 varying vec3 vNormal;
 varying vec3 vTangent;
 varying vec3 vBitangent;
+varying float vTide;
 
 void main() {
   vUv = uv;
-  vec4 wp = modelMatrix * vec4(position, 1.0);
+  float ocean = texture2D(uSpec, uv).r;
+  vec3 n = normalize(position);
+  vec3 M = normalize(uMoon);
+  vec3 S = normalize(uSun);
+  float mu = dot(n, M);
+  float su = dot(n, S);
+  float lunar = 0.5 * (3.0 * mu * mu - 1.0);
+  float solar = 0.5 * (3.0 * su * su - 1.0);
+  float tide = (lunar + 0.46 * solar) * ocean;
+  vTide = tide;
+  vec3 displaced = position + n * tide * uTideAmp * 0.034;
+  vec4 wp = modelMatrix * vec4(displaced, 1.0);
   vPos = wp.xyz;
   mat3 nm = mat3(modelMatrix);
   vNormal = normalize(nm * normal);
@@ -29,12 +45,14 @@ uniform vec3 uCamPos;
 uniform float uAtlasMix;
 uniform float uNightGain;
 uniform float uBump;
+uniform float uTideAmp;
 
 varying vec2 vUv;
 varying vec3 vPos;
 varying vec3 vNormal;
 varying vec3 vTangent;
 varying vec3 vBitangent;
+varying float vTide;
 
 void main() {
   vec3 nTex = texture2D(uNormal, vUv).xyz * 2.0 - 1.0;
@@ -68,6 +86,13 @@ void main() {
   float spec = pow(max(dot(N, H), 0.0), 52.0) * specMask * day;
   color += vec3(0.82, 0.91, 1.0) * spec * 0.72;
   color += vec3(1.0, 0.36, 0.10) * twilight * specMask * 0.16;
+
+  float hi = max(vTide, 0.0);
+  float lo = max(-vTide, 0.0);
+  float k = clamp(uTideAmp, 0.0, 2.4);
+  color += vec3(0.12, 0.48, 0.72) * specMask * hi * 0.78 * k;
+  color += vec3(0.55, 0.86, 1.0) * spec * hi * 0.7 * k;
+  color -= vec3(0.07, 0.04, 0.02) * specMask * lo * 0.5 * k;
 
   vec4 a = texture2D(uAtlas, vUv);
   color = mix(color, mix(color, a.rgb, 0.88), a.a * uAtlasMix);
@@ -157,6 +182,32 @@ void main() {
   float a = c * uOpacity * mix(0.08, 0.78, day);
   vec3 col = mix(vec3(0.55, 0.58, 0.7), vec3(1.0), day);
   gl_FragColor = vec4(col, a);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
+export const MOON_VERT = /* glsl */ `
+varying vec2 vUv;
+varying vec3 vN;
+void main() {
+  vUv = uv;
+  vN = normalize(normalMatrix * normal);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+export const MOON_FRAG = /* glsl */ `
+uniform sampler2D uMap;
+uniform vec3 uSun;
+varying vec2 vUv;
+varying vec3 vN;
+void main() {
+  vec3 albedo = texture2D(uMap, vUv).rgb;
+  float ndl = max(dot(normalize(vN), normalize(uSun)), 0.0);
+  vec3 color = albedo * (0.08 + 1.05 * ndl);
+  color += albedo * vec3(0.12, 0.16, 0.24) * (1.0 - ndl);
+  gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
