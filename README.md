@@ -30,3 +30,18 @@ Textures: day / night lights / specular / normal / clouds under `public/earth/`.
 npm install
 npm run dev
 ```
+
+## Deploy (Vercel)
+
+TanStack Start + Nitro. Do **not** pick Vite / Create React App — they look for `dist` and the globe comes up blank.
+
+On the import screen:
+
+| Field | Value |
+| --- | --- |
+| Project name | `grok-atlas` |
+| Application Preset | **TanStack Start** (scroll). If missing, **Other** |
+| Root Directory | `./` |
+| Build / Output | leave defaults |
+
+`vercel.json` pins `"framework": "tanstack-start"`. No env vars. Production branch is `prod`.
