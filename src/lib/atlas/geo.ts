@@ -1,4 +1,4 @@
-import { geoCentroid, geoContains, geoEquirectangular, geoPath } from "d3-geo";
+import { geoBounds, geoCentroid, geoContains, geoEquirectangular, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 
 export const DR = Math.PI / 180;
@@ -28,25 +28,18 @@ export const NILE: LL & { label: string } = {
   label: "Nile Delta",
 };
 
-export const SITES: { id: string; label: string; lat: number; lon: number; note: string }[] = [
-  { id: "nile", label: "Nile Delta", lat: NILE.lat, lon: NILE.lon, note: "ISS cupola home" },
-  { id: "yerevan", label: "Lake Yerevan", lat: OBS.lat, lon: OBS.lon, note: "observer · 895 m" },
-  { id: "ararat", label: "Ararat", lat: ARARAT.lat, lon: ARARAT.lon, note: "Masis · 5,137 m" },
-];
-
 export type CountryFeat = {
   name: string;
   feature: GeoJSON.Feature<GeoJSON.Geometry, { name: string }>;
+  /** [[west, south], [east, north]] — precomputed tap prefilter. */
+  bounds: [[number, number], [number, number]];
+  centroid: LL;
 };
 
 export function ll2xyz(lat: number, lon: number, r = 1): [number, number, number] {
   const phi = (90 - lat) * DR;
   const th = (lon + 180) * DR;
-  return [
-    -r * Math.sin(phi) * Math.cos(th),
-    r * Math.cos(phi),
-    r * Math.sin(phi) * Math.sin(th),
-  ];
+  return [-r * Math.sin(phi) * Math.cos(th), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(th)];
 }
 
 export function xyz2ll(x: number, y: number, z: number): LL {
@@ -67,20 +60,32 @@ export async function loadCountries(): Promise<CountryFeat[]> {
   >;
   return fc.features
     .filter((f) => f.properties?.name && f.properties.name !== "Antarctica")
-    .map((f) => ({ name: f.properties.name, feature: f }));
+    .map((f) => {
+      const [lon, lat] = geoCentroid(f);
+      return {
+        name: f.properties.name,
+        feature: f,
+        bounds: geoBounds(f) as [[number, number], [number, number]],
+        centroid: { lat, lon },
+      };
+    });
+}
+
+/** True when lon sits inside [w, e], honouring rings that cross the antimeridian. */
+function lonInside(lon: number, w: number, e: number): boolean {
+  return w <= e ? lon >= w && lon <= e : lon >= w || lon <= e;
 }
 
 export function pickCountry(countries: CountryFeat[], lat: number, lon: number): string | null {
   for (const c of countries) {
+    const [[w, s], [e, n]] = c.bounds;
+    if (lat < s || lat > n || !lonInside(lon, w, e)) continue;
     if (geoContains(c.feature, [lon, lat])) return c.name;
   }
   return null;
 }
 
-export function centroidOf(c: CountryFeat): LL {
-  const [lon, lat] = geoCentroid(c.feature);
-  return { lat, lon };
-}
+export const centroidOf = (c: CountryFeat): LL => c.centroid;
 
 export const OVERLAY_W = 2048;
 export const OVERLAY_H = 1024;

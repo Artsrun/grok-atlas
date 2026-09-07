@@ -1,4 +1,5 @@
-import { DR, ll2xyz } from "./geo";
+import { DR, ll2xyz } from "./geo.ts";
+import { subsolarLat } from "./sun.ts";
 
 /** Lunar orbital inclination. MEASURED. */
 export const MOON_INC = 5.145;
@@ -44,7 +45,7 @@ export function springLabel(moonLon: number, sunLon: number): string {
 export function tideAt(lat: number, lon: number, moonLon: number, sunLon: number): number {
   const n = ll2xyz(lat, lon, 1);
   const m = moonXYZ(moonLon, 1);
-  const s = ll2xyz(8, sunLon, 1);
+  const s = ll2xyz(subsolarLat(sunLon), sunLon, 1);
   const nm = n[0] * m[0] + n[1] * m[1] + n[2] * m[2];
   const ns = n[0] * s[0] + n[1] * s[1] + n[2] * s[2];
   const lunar = 0.5 * (3 * nm * nm - 1);

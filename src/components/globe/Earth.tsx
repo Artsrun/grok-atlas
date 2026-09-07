@@ -4,14 +4,11 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useAtlas } from "@/lib/atlas/store";
 import { ll2xyz } from "@/lib/atlas/geo";
+import { subsolarLat } from "@/lib/atlas/sun";
 import { moonXYZ } from "@/lib/atlas/tide";
 import { ATMO_FRAG, ATMO_VERT, CLOUD_FRAG, CLOUD_VERT, EARTH_FRAG, EARTH_VERT } from "./shaders";
 
-export function Earth({
-  atlasTex,
-}: {
-  atlasTex: THREE.CanvasTexture;
-}) {
+export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
   const [dayMap, nightMap, specMap, normalMap, cloudMap] = useTexture([
     "/earth/day.jpg",
     "/earth/night.png",
@@ -35,6 +32,8 @@ export function Earth({
     g.computeTangents();
     return g;
   }, []);
+
+  useEffect(() => () => geo.dispose(), [geo]);
 
   const earthMat = useRef<THREE.ShaderMaterial>(null);
   const atmoMat = useRef<THREE.ShaderMaterial>(null);
@@ -90,8 +89,7 @@ export function Earth({
 
   useFrame(({ camera, clock }) => {
     const s = useAtlas.getState();
-    const decl = 23.4 * Math.sin((s.sunLon * Math.PI) / 180) * 0.15;
-    const xyz = ll2xyz(decl, s.sunLon, 1);
+    const xyz = ll2xyz(subsolarLat(s.sunLon), s.sunLon, 1);
     sunVec.set(xyz[0], xyz[1], xyz[2]);
     const m = moonXYZ(s.moonLon, 1);
     moonVec.set(m[0], m[1], m[2]);
