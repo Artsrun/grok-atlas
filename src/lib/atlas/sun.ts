@@ -4,8 +4,7 @@ import { DR } from "./geo.ts";
 export const OBLIQUITY = 23.44;
 
 /**
- * Subsolar latitude for a given subsolar longitude.
- * One synthetic year per full sweep of `sunLon` — DECLARED, not an ephemeris.
- * Single source of truth: shader terminator, sun marker and tide model all read this.
+ * Declination stand-in when the user parks the sun slider.
+ * Live clock path uses `skyAt()` in ephemeris.ts instead.
  */
 export const subsolarLat = (sunLon: number): number => OBLIQUITY * Math.sin(sunLon * DR);
