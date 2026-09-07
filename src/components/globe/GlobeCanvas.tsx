@@ -1,9 +1,13 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { CountryFeat } from "@/lib/atlas/geo";
 import { ll2xyz, OVERLAY_H, OVERLAY_W, paintAtlas, pickCountry, xyz2ll } from "@/lib/atlas/geo";
+import type { CameraAt } from "@/lib/atlas/camera";
+import { cameraListeners, emitCamera, onFlyRequest } from "@/lib/atlas/camera";
+import { hashAt } from "@/lib/atlas/hash";
+import type { Focus } from "@/lib/atlas/store";
 import type { FlyPath } from "@/lib/atlas/fly";
 import {
   distAt,
@@ -26,6 +30,20 @@ const HOME_POS = ll2xyz(HOME.lat, HOME.lon, HOME.dist);
 const ARRIVED_ANGLE = 0.014;
 const ARRIVED_RADIUS = 0.04;
 const TAP_SLOP = 6;
+/**
+ * Parked below this speed, in earth radii per second — a rate, not a per-frame
+ * step, so a 120 Hz phone and a 30 fps laptop agree on when the rig stopped.
+ * ~1° of arc per second at orbit distance: drift you cannot see.
+ */
+const MOVE_RATE = 0.02;
+/** Seconds under that rate before moveend. Outlasts the tail of orbit damping. */
+const SETTLE = 0.18;
+
+/** Mapbox's `hash` sets the opening view outright — no flight from home. */
+const bootPos = () => {
+  const at = hashAt();
+  return at ? ll2xyz(at.lat, at.lon, at.dist) : HOME_POS;
+};
 
 function OverlayTexture({
   countries,
@@ -70,8 +88,6 @@ function Rig() {
   const { camera } = useThree();
   const autoRotate = useAtlas((s) => s.autoRotate);
   const tiltOn = useAtlas((s) => s.tiltOn);
-  const focus = useAtlas((s) => s.focus);
-  const flySeq = useAtlas((s) => s.flySeq);
 
   const fromDir = useRef(new THREE.Vector3());
   const toDir = useRef(new THREE.Vector3());
@@ -82,32 +98,42 @@ function Rig() {
   const elapsed = useRef(0);
   const reduced = useRef(false);
 
+  const seen = useRef(new THREE.Vector3(NaN, NaN, NaN));
+  const moving = useRef(false);
+  const still = useRef(0);
+
   useEffect(() => watchReducedMotion((on) => (reduced.current = on)), []);
 
-  useEffect(() => {
-    if (!focus) return;
-    toDir.current.set(...ll2xyz(focus.lat, focus.lon, 1)).normalize();
-    const here = camera.position;
-    const r0 = here.length();
-    const r1 = THREE.MathUtils.clamp(focus.dist ?? r0, MIN_DIST, MAX_DIST);
-    fromDir.current.copy(here).normalize();
-    const angle = fromDir.current.angleTo(toDir.current);
-    if (angle < ARRIVED_ANGLE && Math.abs(r0 - r1) < ARRIVED_RADIUS) {
-      path.current = null;
-      return;
-    }
-    // Mapbox `respectPrefersReducedMotion`: arrive, don't fly.
-    if (reduced.current) {
-      camera.position.copy(toDir.current).setLength(r1);
-      path.current = null;
-      return;
-    }
-    const p = flyPath(spanAt(r0, FOV), spanAt(r1, FOV), angle);
-    path.current = p;
-    arc.current = angle;
-    dur.current = flyDuration(p.S);
-    elapsed.current = 0;
-  }, [flySeq, focus, camera]);
+  const startFlight = useCallback(
+    (focus: Focus) => {
+      toDir.current.set(...ll2xyz(focus.lat, focus.lon, 1)).normalize();
+      const here = camera.position;
+      const r0 = here.length();
+      const r1 = THREE.MathUtils.clamp(focus.dist ?? r0, MIN_DIST, MAX_DIST);
+      fromDir.current.copy(here).normalize();
+      const angle = fromDir.current.angleTo(toDir.current);
+      if (angle < ARRIVED_ANGLE && Math.abs(r0 - r1) < ARRIVED_RADIUS) {
+        path.current = null;
+        return;
+      }
+      // Mapbox `respectPrefersReducedMotion`: arrive, don't fly.
+      if (reduced.current) {
+        camera.position.copy(toDir.current).setLength(r1);
+        path.current = null;
+        return;
+      }
+      const p = flyPath(spanAt(r0, FOV), spanAt(r1, FOV), angle);
+      path.current = p;
+      arc.current = angle;
+      dur.current = flyDuration(p.S);
+      elapsed.current = 0;
+    },
+    [camera],
+  );
+
+  useEffect(() => onFlyRequest(startFlight), [startFlight]);
+
+  const atOf = (p: THREE.Vector3): CameraAt => ({ ...xyz2ll(p.x, p.y, p.z), dist: p.length() });
 
   useFrame((_, dt) => {
     const d = Math.min(dt, 0.05);
@@ -128,6 +154,28 @@ function Rig() {
     if (c) {
       c.autoRotate = st.autoRotate && !st.tiltOn && !p && !reduced.current;
       c.enabled = !st.tiltOn;
+    }
+
+    // Move lifecycle. Nothing settles while autoRotate runs, so it never writes a URL.
+    const pos = camera.position;
+    if (Number.isNaN(seen.current.x)) {
+      // Appearing is not moving: seed the baseline so a camera nobody touches
+      // stays silent, and never writes a URL for a view the user never chose.
+      seen.current.copy(pos);
+    } else if (pos.distanceTo(seen.current) > MOVE_RATE * d) {
+      seen.current.copy(pos);
+      still.current = 0;
+      if (!moving.current) {
+        moving.current = true;
+        if (cameraListeners("movestart")) emitCamera("movestart", atOf(pos));
+      }
+      if (cameraListeners("move")) emitCamera("move", atOf(pos));
+    } else if (moving.current) {
+      still.current += d;
+      if (still.current >= SETTLE) {
+        moving.current = false;
+        if (cameraListeners("moveend")) emitCamera("moveend", atOf(pos));
+      }
     }
   });
 
@@ -280,7 +328,7 @@ export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
   return (
     <Canvas
       className="h-full w-full touch-none"
-      camera={{ fov: FOV, near: 0.08, far: 220, position: HOME_POS }}
+      camera={{ fov: FOV, near: 0.08, far: 220, position: bootPos() }}
       dpr={[1, 1.75]}
       gl={{
         antialias: true,

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CountryFeat } from "@/lib/atlas/geo";
 import { loadCountries } from "@/lib/atlas/geo";
 import { focusForCountry } from "@/lib/atlas/fly";
+import { hashAt, installHashSync } from "@/lib/atlas/hash";
 import { pinHere, pollIss } from "@/lib/atlas/locate";
 import { focusOf, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
@@ -20,6 +21,8 @@ export function AtlasApp() {
   const [err, setErr] = useState<string | null>(null);
   const [edition, setEdition] = useState<Edition>(editionFromUrl);
   const cupola = useAtlas((s) => s.cupola);
+  // Read during render, before the rig can write one of its own.
+  const bootHash = useRef(hashAt());
 
   useEffect(() => {
     let live = true;
@@ -31,6 +34,8 @@ export function AtlasApp() {
         const p = new URLSearchParams(location.search);
         const site = p.get("site");
         const country = p.get("c");
+        // A query view is deliberate and outranks the hash; the hash outranks
+        // auto-locate, and the canvas already opened on it — so don't fly away.
         if (site === "here") {
           pinHere(true).catch(() => {});
         } else if (site) {
@@ -43,7 +48,7 @@ export function AtlasApp() {
             useAtlas.getState().flyTo(focusForCountry(hit));
           }
         } else {
-          pinHere(true).catch(() => {});
+          pinHere(!bootHash.current).catch(() => {});
         }
       })
       .catch((e: unknown) => {
@@ -52,6 +57,14 @@ export function AtlasApp() {
     return () => {
       live = false;
     };
+  }, []);
+
+  useEffect(() => {
+    // The hash names a camera, not a place — so clear the caption rather than
+    // leave HOME's label sitting over wherever the URL actually points.
+    const at = bootHash.current;
+    if (at) useAtlas.setState({ focus: { ...at } });
+    return installHashSync();
   }, []);
 
   useEffect(() => {

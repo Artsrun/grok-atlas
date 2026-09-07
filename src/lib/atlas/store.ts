@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { requestFly } from "./camera.ts";
 import { skyAt } from "./ephemeris.ts";
 import { focusOf, HOME } from "./model.ts";
 
@@ -52,7 +53,6 @@ type AtlasState = {
   panelOpen: boolean;
   tiltOn: boolean;
   focus: Focus | null;
-  flySeq: number;
   here: { lat: number; lon: number } | null;
   iss: IssFix | null;
   setNames: (n: string[]) => void;
@@ -100,7 +100,6 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   panelOpen: false,
   tiltOn: false,
   focus: focusOf(HOME),
-  flySeq: 0,
   here: null,
   iss: null,
   setNames: (names) => set({ names }),
@@ -114,7 +113,11 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   setCloudOpacity: (cloudOpacity) => set({ cloudOpacity }),
   setTideGain: (tideGain) => set({ tideGain }),
   toggle: (k) => set({ [k]: !get()[k] } as Partial<AtlasState>),
-  flyTo: (focus) => set((s) => ({ focus, flySeq: s.flySeq + 1 })),
+  /** State for the HUD, command for the rig. */
+  flyTo: (focus) => {
+    set({ focus });
+    requestFly(focus);
+  },
   setHere: (here) => set({ here }),
   setIss: (iss) => set({ iss }),
   calmMotion: () => set({ autoSun: true, autoMoon: true, autoRotate: false }),
@@ -123,11 +126,17 @@ export const useAtlas = create<AtlasState>((set, get) => ({
     if (!s.autoSun && !s.autoMoon) return;
     const e = skyAt();
     const patch: Partial<AtlasState> = {};
-    if (s.autoSun && (Math.abs(s.sunLon - e.sunLon) > 0.04 || Math.abs(s.sunLat - e.sunLat) > 0.04)) {
+    if (
+      s.autoSun &&
+      (Math.abs(s.sunLon - e.sunLon) > 0.04 || Math.abs(s.sunLat - e.sunLat) > 0.04)
+    ) {
       patch.sunLon = e.sunLon;
       patch.sunLat = e.sunLat;
     }
-    if (s.autoMoon && (Math.abs(s.moonLon - e.moonLon) > 0.04 || Math.abs(s.moonLat - e.moonLat) > 0.04)) {
+    if (
+      s.autoMoon &&
+      (Math.abs(s.moonLon - e.moonLon) > 0.04 || Math.abs(s.moonLat - e.moonLat) > 0.04)
+    ) {
       patch.moonLon = e.moonLon;
       patch.moonLat = e.moonLat;
     }

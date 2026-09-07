@@ -16,6 +16,8 @@ import {
 } from "./fly.ts";
 import { HOME, VIEWS } from "./model.ts";
 import { skyAt, wrapLon } from "./ephemeris.ts";
+import { formatHash, parseHash } from "./hash.ts";
+import { cameraListeners, emitCamera, onCamera, onFlyRequest, requestFly } from "./camera.ts";
 import { subsolarLat, OBLIQUITY } from "./sun.ts";
 import { elongation, springFactor, springLabel, tideAt } from "./tide.ts";
 
@@ -194,4 +196,96 @@ test("boundsSpan narrows a lon span at high latitude", () => {
     [30, 76],
   ];
   assert.ok(boundsSpan(arctic) < boundsSpan(equator));
+});
+
+test("hash round-trips a camera at write precision", () => {
+  for (const at of [
+    { lat: 40.177, lon: 44.487, dist: 2.55 },
+    { lat: -33.9, lon: 151.2, dist: 3.59 },
+    { lat: 0, lon: -180, dist: 1.42 },
+    { lat: 90, lon: 180, dist: 14 },
+  ]) {
+    const back = parseHash(formatHash(at));
+    assert.ok(back, `no parse for ${formatHash(at)}`);
+    near(back.lat, at.lat, 5e-4);
+    near(back.lon, wrapLon(at.lon), 5e-4);
+    near(back.dist, at.dist, 5e-3);
+  }
+});
+
+test("parseHash rejects anything that is not lat/lon/dist", () => {
+  for (const bad of [
+    "",
+    "#",
+    "#v=2",
+    "#40.1/44.4",
+    "#40.1/44.4/2.5/0",
+    "#a/b/c",
+    "#40.1,44.4,2.5",
+  ]) {
+    assert.equal(parseHash(bad), null, bad);
+  }
+});
+
+test("parseHash clamps range but keeps a hand-typed hash usable", () => {
+  assert.deepEqual(parseHash("#40/44/1"), { lat: 40, lon: 44, dist: MIN_DIST });
+  assert.deepEqual(parseHash("#40/44/99"), { lat: 40, lon: 44, dist: MAX_DIST });
+  assert.equal(parseHash("#120/44/3")?.lat, 90);
+  assert.equal(parseHash("#40/540/3")?.lon, wrapLon(540), "540° is the antimeridian, not 180");
+});
+
+test("formatHash normalises longitude so the same view writes one string", () => {
+  assert.equal(
+    formatHash({ lat: 10, lon: 190, dist: 3 }),
+    formatHash({ lat: 10, lon: -170, dist: 3 }),
+  );
+});
+
+test("hash accepts a leading marker or none", () => {
+  assert.deepEqual(parseHash("#40/44/3"), parseHash("40/44/3"));
+});
+
+test("camera events fan out and unsubscribe cleanly", () => {
+  const seen: string[] = [];
+  const off = onCamera("moveend", (at) => seen.push(`a${at.lat}`));
+  const off2 = onCamera("moveend", (at) => seen.push(`b${at.lat}`));
+  assert.equal(cameraListeners("moveend"), 2);
+  emitCamera("moveend", { lat: 1, lon: 0, dist: 2 });
+  off();
+  emitCamera("moveend", { lat: 2, lon: 0, dist: 2 });
+  off2();
+  emitCamera("moveend", { lat: 3, lon: 0, dist: 2 });
+  assert.deepEqual(seen, ["a1", "b1", "b2"]);
+  assert.equal(cameraListeners("moveend"), 0);
+});
+
+test("camera events do not cross channels", () => {
+  const seen: string[] = [];
+  const off = onCamera("move", () => seen.push("move"));
+  emitCamera("moveend", { lat: 0, lon: 0, dist: 2 });
+  emitCamera("movestart", { lat: 0, lon: 0, dist: 2 });
+  assert.deepEqual(seen, []);
+  off();
+});
+
+test("a flight requested before the rig mounts is replayed once", () => {
+  requestFly({ lat: 10, lon: 20, label: "early" });
+  const got: string[] = [];
+  const off = onFlyRequest((f) => got.push(f.label ?? "?"));
+  assert.deepEqual(got, ["early"], "the deep link still flies");
+  const off2 = onFlyRequest((f) => got.push(`second:${f.label}`));
+  assert.deepEqual(got, ["early"], "replay is consumed, not re-delivered");
+  off();
+  off2();
+});
+
+test("flights reach every live subscriber and stop at unsubscribe", () => {
+  const got: string[] = [];
+  const off = onFlyRequest((f) => got.push(`a${f.label}`));
+  requestFly({ lat: 0, lon: 0, label: "x" });
+  off();
+  requestFly({ lat: 0, lon: 0, label: "y" });
+  const off2 = onFlyRequest((f) => got.push(`b${f.label}`));
+  assert.deepEqual(got, ["ax", "by"], "y was buffered while nobody listened");
+  off2();
 });
