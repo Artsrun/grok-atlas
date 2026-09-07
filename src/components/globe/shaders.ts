@@ -63,19 +63,28 @@ void main() {
   vec3 L = normalize(uSun);
   vec3 H = normalize(L + V);
 
+  // Bruno Simon / three.js Journey + TSL earth: sunOrientation → dayMix
   float ndl = dot(N, L);
-  float dayStrength = smoothstep(-0.25, 0.50, ndl);
+  float dayMix = smoothstep(-0.25, 0.5, ndl);
 
   vec3 dayC = texture2D(uDay, vUv).rgb;
-  vec3 nightC = texture2D(uNight, vUv).rgb;
-  float lum = max(nightC.r, max(nightC.g, nightC.b));
-  vec3 lights = nightC * mix(1.6, 4.8, lum) * uNightGain;
+  vec3 nightTex = texture2D(uNight, vUv).rgb;
+
+  // Night map is city lamps on black. Mip-smear lives in the dark floor —
+  // gate it out so only real lights survive, then sharpen.
+  float lamp = max(nightTex.r, max(nightTex.g, nightTex.b));
+  lamp = smoothstep(0.20, 0.58, lamp);
+  lamp = lamp * lamp;
+
+  vec3 nightLand = dayC * 0.035;
+  vec3 cities = nightTex * lamp * uNightGain * vec3(1.18, 0.90, 0.55);
+  vec3 nightC = nightLand + cities;
+
+  vec3 lit = dayC * (0.14 + 0.86 * max(ndl, 0.0));
+  vec3 color = mix(nightC, lit, dayMix);
 
   float specMask = texture2D(uSpec, vUv).r;
-  vec3 lit = dayC * (0.12 + 0.88 * max(ndl, 0.0));
-  vec3 color = mix(lights, lit, dayStrength);
-
-  float spec = pow(max(dot(N, H), 0.0), 48.0) * specMask * dayStrength;
+  float spec = pow(max(dot(N, H), 0.0), 48.0) * specMask * dayMix;
   color += vec3(0.78, 0.88, 1.0) * spec * 0.65;
 
   vec3 atmoDay = vec3(0.302, 0.698, 1.0);
@@ -83,7 +92,7 @@ void main() {
   vec3 atmo = mix(atmoTwilight, atmoDay, smoothstep(-0.25, 0.75, ndl));
   float fres = pow(1.0 - max(dot(normalize(vNormal), V), 0.0), 2.0);
   float atmoMix = smoothstep(-0.5, 1.0, ndl) * fres;
-  color = mix(color, atmo, clamp(atmoMix, 0.0, 1.0) * 0.38);
+  color = mix(color, atmo, clamp(atmoMix, 0.0, 1.0) * 0.32);
 
   float k = clamp(uTideAmp, 0.0, 2.4);
   color += vec3(0.10, 0.40, 0.66) * specMask * max(vTide, 0.0) * 0.45 * k;

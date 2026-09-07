@@ -1,4 +1,4 @@
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
@@ -8,6 +8,7 @@ import { moonXYZ } from "@/lib/atlas/tide";
 import { ATMO_FRAG, ATMO_VERT, CLOUD_FRAG, CLOUD_VERT, EARTH_FRAG, EARTH_VERT } from "./shaders";
 
 export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
+  const gl = useThree((s) => s.gl);
   const [dayMap, nightMap, specMap, normalMap, cloudMap] = useTexture([
     "/earth/day.jpg",
     "/earth/night.png",
@@ -17,14 +18,23 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
   ]);
 
   useEffect(() => {
+    const maxA = Math.min(16, gl.capabilities.getMaxAnisotropy());
     dayMap.colorSpace = THREE.SRGBColorSpace;
     nightMap.colorSpace = THREE.SRGBColorSpace;
     atlasTex.colorSpace = THREE.SRGBColorSpace;
-    dayMap.anisotropy = 8;
-    nightMap.anisotropy = 8;
+    dayMap.anisotropy = maxA;
+    nightMap.anisotropy = maxA;
+    cloudMap.anisotropy = maxA;
+    // Mips average city blocks into fog. Sample the night map at full res.
+    nightMap.generateMipmaps = false;
+    nightMap.minFilter = THREE.LinearFilter;
+    nightMap.magFilter = THREE.LinearFilter;
+    nightMap.wrapS = THREE.ClampToEdgeWrapping;
+    nightMap.wrapT = THREE.ClampToEdgeWrapping;
     cloudMap.wrapS = THREE.RepeatWrapping;
     dayMap.needsUpdate = true;
-  }, [dayMap, nightMap, cloudMap, atlasTex]);
+    nightMap.needsUpdate = true;
+  }, [dayMap, nightMap, cloudMap, atlasTex, gl]);
 
   const geo = useMemo(() => {
     const g = new THREE.SphereGeometry(1, 96, 64);
