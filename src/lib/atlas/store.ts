@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { skyAt } from "./ephemeris.ts";
 import { focusOf, HOME } from "./model.ts";
 
 export type Focus = {
@@ -6,9 +7,10 @@ export type Focus = {
   lon: number;
   label?: string;
   dist?: number;
-  /** VIEWS id when this focus came from a named view — drives ?site= sharing. */
   site?: string;
 };
+
+export type IssFix = { lat: number; lon: number; alt: number; vel: number };
 
 type LayerKey =
   | "showAtmosphere"
@@ -29,7 +31,9 @@ type AtlasState = {
   names: string[];
   selected: string | null;
   sunLon: number;
+  sunLat: number;
   moonLon: number;
+  moonLat: number;
   autoSun: boolean;
   autoMoon: boolean;
   autoRotate: boolean;
@@ -48,8 +52,9 @@ type AtlasState = {
   panelOpen: boolean;
   tiltOn: boolean;
   focus: Focus | null;
-  /** Bumped on every flyTo so the rig re-flies even to an identical target. */
   flySeq: number;
+  here: { lat: number; lon: number } | null;
+  iss: IssFix | null;
   setNames: (n: string[]) => void;
   select: (name: string | null) => void;
   setSunLon: (v: number) => void;
@@ -62,22 +67,27 @@ type AtlasState = {
   setTideGain: (v: number) => void;
   toggle: (k: LayerKey) => void;
   flyTo: (f: Focus) => void;
-  /** Honour prefers-reduced-motion: park the sun, moon and auto-orbit. */
+  setHere: (here: { lat: number; lon: number } | null) => void;
+  setIss: (iss: IssFix | null) => void;
   calmMotion: () => void;
-  tickOrbits: (dt: number) => void;
+  tickOrbits: () => void;
 };
+
+const boot = skyAt();
 
 export const useAtlas = create<AtlasState>((set, get) => ({
   names: [],
   selected: null,
-  sunLon: HOME.lon + 182,
-  moonLon: 0,
+  sunLon: boot.sunLon,
+  sunLat: boot.sunLat,
+  moonLon: boot.moonLon,
+  moonLat: boot.moonLat,
   autoSun: true,
   autoMoon: true,
-  autoRotate: true,
-  nightGain: 2.35,
-  bump: 1.15,
-  cloudOpacity: 0.55,
+  autoRotate: false,
+  nightGain: 1.65,
+  bump: 1.05,
+  cloudOpacity: 0.42,
   tideGain: 1,
   showAtmosphere: true,
   showClouds: true,
@@ -85,12 +95,14 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   showCage: false,
   showIss: true,
   showMoon: true,
-  showTides: true,
-  cupola: true,
+  showTides: false,
+  cupola: false,
   panelOpen: false,
   tiltOn: false,
   focus: focusOf(HOME),
   flySeq: 0,
+  here: null,
+  iss: null,
   setNames: (names) => set({ names }),
   select: (selected) => set({ selected }),
   setSunLon: (sunLon) => set({ sunLon }),
@@ -103,12 +115,22 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   setTideGain: (tideGain) => set({ tideGain }),
   toggle: (k) => set({ [k]: !get()[k] } as Partial<AtlasState>),
   flyTo: (focus) => set((s) => ({ focus, flySeq: s.flySeq + 1 })),
-  calmMotion: () => set({ autoSun: false, autoMoon: false, autoRotate: false }),
-  tickOrbits: (dt) => {
+  setHere: (here) => set({ here }),
+  setIss: (iss) => set({ iss }),
+  calmMotion: () => set({ autoSun: true, autoMoon: true, autoRotate: false }),
+  tickOrbits: () => {
     const s = get();
+    if (!s.autoSun && !s.autoMoon) return;
+    const e = skyAt();
     const patch: Partial<AtlasState> = {};
-    if (s.autoSun) patch.sunLon = (s.sunLon + dt * 1.65 + 360) % 360;
-    if (s.autoMoon) patch.moonLon = (s.moonLon + dt * 3.2 + 360) % 360;
+    if (s.autoSun && (Math.abs(s.sunLon - e.sunLon) > 0.04 || Math.abs(s.sunLat - e.sunLat) > 0.04)) {
+      patch.sunLon = e.sunLon;
+      patch.sunLat = e.sunLat;
+    }
+    if (s.autoMoon && (Math.abs(s.moonLon - e.moonLon) > 0.04 || Math.abs(s.moonLat - e.moonLat) > 0.04)) {
+      patch.moonLon = e.moonLon;
+      patch.moonLat = e.moonLat;
+    }
     if (Object.keys(patch).length) set(patch);
   },
 }));
