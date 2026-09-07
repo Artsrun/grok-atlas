@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CountryFeat } from "@/lib/atlas/geo";
 import { centroidOf, loadCountries } from "@/lib/atlas/geo";
+import { pinHere, pollIss } from "@/lib/atlas/locate";
 import { focusOf, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { GlobeCanvas } from "@/components/globe/GlobeCanvas";
@@ -29,9 +30,10 @@ export function AtlasApp() {
         const p = new URLSearchParams(location.search);
         const site = p.get("site");
         const country = p.get("c");
-        if (site) {
+        if (site === "here") {
+          pinHere(true).catch(() => {});
+        } else if (site) {
           const v = VIEWS.find((x) => x.id === site);
-          // dist matters: ?site=moon is unreadable from the cupola radius.
           if (v) useAtlas.getState().flyTo(focusOf(v));
         } else if (country) {
           const hit = c.find((x) => x.name.toLowerCase() === country.toLowerCase());
@@ -40,6 +42,8 @@ export function AtlasApp() {
             useAtlas.getState().select(hit.name);
             useAtlas.getState().flyTo({ ...ll, label: hit.name });
           }
+        } else {
+          pinHere(true).catch(() => {});
         }
       })
       .catch((e: unknown) => {
@@ -50,8 +54,12 @@ export function AtlasApp() {
     };
   }, []);
 
-  // Edition is a real navigation step: pushState so Back leaves the instrument,
-  // and popstate so Back/Forward actually swap the HUD.
+  useEffect(() => {
+    pollIss().catch(() => {});
+    const id = setInterval(() => pollIss().catch(() => {}), 5000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     if (editionFromUrl() === edition) return;
     const url = new URL(location.href);
