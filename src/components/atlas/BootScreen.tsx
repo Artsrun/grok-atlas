@@ -6,7 +6,11 @@ export function BootScreen({
   detail?: string;
 }) {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-wafer px-6 text-center text-silk">
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-wafer px-6 text-center text-silk"
+    >
       <div className="font-display text-sm font-bold tracking-[0.28em] text-silk">
         GROK<span className="text-ochre">.ATLAS</span>
       </div>

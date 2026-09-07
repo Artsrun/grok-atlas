@@ -6,21 +6,25 @@ import type { CountryFeat } from "@/lib/atlas/geo";
 import {
   centroidOf,
   ll2xyz,
-  NILE,
   OVERLAY_H,
   OVERLAY_W,
   paintAtlas,
   pickCountry,
   xyz2ll,
 } from "@/lib/atlas/geo";
+import { HOME } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { Earth } from "./Earth";
 import { Borders } from "./Borders";
 import { Cage, Luna, SitePins, Starfield, Station, SunMarker } from "./Extras";
 
-const HOME_DIST = 2.58;
-const HOME_POS = ll2xyz(NILE.lat, NILE.lon, HOME_DIST);
+const HOME_POS = ll2xyz(HOME.lat, HOME.lon, HOME.dist);
 const FLY_SEC = 1.45;
+/** Camera counts as "already there" inside this angle (rad) and radius delta. */
+const ARRIVED_ANGLE = 0.014;
+const ARRIVED_RADIUS = 0.04;
+/** Pointer travel (px) above which an up event is a drag, not a tap. */
+const TAP_SLOP = 6;
 
 function OverlayTexture({
   countries,
@@ -74,32 +78,32 @@ function Rig() {
   const autoRotate = useAtlas((s) => s.autoRotate);
   const tiltOn = useAtlas((s) => s.tiltOn);
   const focus = useAtlas((s) => s.focus);
+  const flySeq = useAtlas((s) => s.flySeq);
 
   const fromDir = useRef(new THREE.Vector3());
   const toDir = useRef(new THREE.Vector3());
   const tmp = useRef(new THREE.Vector3());
-  const fromR = useRef(HOME_DIST);
-  const toR = useRef(HOME_DIST);
+  const fromR = useRef(HOME.dist);
+  const toR = useRef(HOME.dist);
   const flyT = useRef(1);
 
   useEffect(() => {
     if (!focus) return;
     toDir.current.set(...ll2xyz(focus.lat, focus.lon, 1)).normalize();
     const here = camera.position;
-    const wantR = focus.dist ?? here.length();
-    const already =
-      Math.abs(here.x / here.length() - toDir.current.x) < 0.012 &&
-      Math.abs(here.z / here.length() - toDir.current.z) < 0.012 &&
-      Math.abs(here.length() - wantR) < 0.04;
-    if (already) {
+    const r = here.length();
+    const wantR = focus.dist ?? r;
+    fromDir.current.copy(here).normalize();
+    const angle = fromDir.current.angleTo(toDir.current);
+    if (angle < ARRIVED_ANGLE && Math.abs(r - wantR) < ARRIVED_RADIUS) {
       flyT.current = 1;
       return;
     }
-    fromDir.current.copy(here).normalize();
-    fromR.current = here.length();
+    fromR.current = r;
     toR.current = wantR;
     flyT.current = 0;
-  }, [focus?.lat, focus?.lon, focus?.dist, camera]);
+    // flySeq drives this: re-selecting an identical target must still re-fly.
+  }, [flySeq, focus, camera]);
 
   useFrame((_, dt) => {
     const d = Math.min(dt, 0.05);
@@ -146,20 +150,29 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
 
   useEffect(() => {
     const el = gl.domElement;
-    let sx = 0;
-    let sy = 0;
+    // One tap = one primary pointer down/up pair that barely moved. A pinch
+    // ends with a non-primary up and must never register as a country pick.
+    let start: { id: number; x: number; y: number } | null = null;
     const down = (e: PointerEvent) => {
-      sx = e.clientX;
-      sy = e.clientY;
+      start = e.isPrimary ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+    };
+    const cancel = () => {
+      start = null;
     };
     const up = (e: PointerEvent) => {
-      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 6) return;
+      const from = start;
+      start = null;
+      if (!from || from.id !== e.pointerId) return;
+      if (Math.hypot(e.clientX - from.x, e.clientY - from.y) > TAP_SLOP) return;
+      // Raycast the earth alone — the starfield and border lines carry tens of
+      // thousands of primitives and none of them are pickable.
+      const earth = scene.getObjectByName("earth");
+      if (!earth) return;
       const rect = el.getBoundingClientRect();
       ptr.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       ptr.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       ray.setFromCamera(ptr, camera);
-      const hits = ray.intersectObjects(scene.children, true);
-      const hit = hits.find((h) => h.object.name === "earth");
+      const hit = ray.intersectObject(earth, false)[0];
       if (!hit?.point) return;
       const { lat, lon } = xyz2ll(hit.point.x, hit.point.y, hit.point.z);
       const name = pickCountry(countries, lat, lon);
@@ -174,9 +187,11 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
     };
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", cancel);
     return () => {
       el.removeEventListener("pointerdown", down);
       el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", cancel);
     };
   }, [camera, scene, gl, countries, ray, ptr]);
   return null;

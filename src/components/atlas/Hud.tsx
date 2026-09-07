@@ -1,16 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
-import { centroidOf, NILE, type CountryFeat } from "@/lib/atlas/geo";
-import { VIEWS } from "@/lib/atlas/model";
+import { memo, useEffect, useMemo, useState } from "react";
+import { centroidOf, type CountryFeat } from "@/lib/atlas/geo";
+import { focusOf, HOME, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { springLabel, tideAt, tideMeters } from "@/lib/atlas/tide";
 
-function Tag({
-  kind,
-  children,
-}: {
-  kind: "m" | "d" | "c" | "x";
-  children: string;
-}) {
+/**
+ * `tickOrbits` writes sunLon/moonLon every frame, so anything that subscribes
+ * to them re-renders at 60 fps. The readouts only ever show whole degrees —
+ * subscribe rounded, and keep those subscriptions in leaf components so the
+ * HUD shell (and its 170-option datalist) never reconciles on drift.
+ */
+const useSunDeg = () => useAtlas((s) => Math.round(s.sunLon));
+const useMoonDeg = () => useAtlas((s) => Math.round(s.moonLon) % 360);
+
+function Tag({ kind, children }: { kind: "m" | "d" | "c" | "x"; children: string }) {
   const cls =
     kind === "m"
       ? "text-ochre border-ochre"
@@ -28,26 +31,21 @@ function Tag({
   );
 }
 
-function LayerToggle({
-  id,
-  label,
-  on,
-}: {
-  id:
-    | "showAtmosphere"
-    | "showClouds"
-    | "showBorders"
-    | "showCage"
-    | "showIss"
-    | "showMoon"
-    | "showTides"
-    | "cupola"
-    | "autoSun"
-    | "autoMoon"
-    | "autoRotate";
-  label: string;
-  on: boolean;
-}) {
+type ToggleId =
+  | "showAtmosphere"
+  | "showClouds"
+  | "showBorders"
+  | "showCage"
+  | "showIss"
+  | "showMoon"
+  | "showTides"
+  | "cupola"
+  | "autoSun"
+  | "autoMoon"
+  | "autoRotate";
+
+function LayerToggle({ id, label }: { id: ToggleId; label: string }) {
+  const on = useAtlas((s) => s[id]);
   return (
     <button
       type="button"
@@ -76,88 +74,311 @@ function Clock() {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
-  return <span className="font-mono text-xs font-medium tabular-nums text-ochre">{t}</span>;
+  return (
+    <span className="font-mono text-xs font-medium tabular-nums text-ochre">
+      <time dateTime={t}>{t}</time>
+    </span>
+  );
 }
 
-export function Hud({ countries }: { countries: CountryFeat[] }) {
+function Ticker({ count }: { count: number }) {
   const selected = useAtlas((s) => s.selected);
+  const sun = useSunDeg();
+  const moon = useMoonDeg();
+  return (
+    <div className="pointer-events-none absolute inset-x-2 top-[52px] z-20 flex overflow-x-auto border border-etch bg-substrate font-mono text-2xs uppercase tracking-[0.14em] text-dim">
+      <span className="shrink-0 border-r border-etch px-3 py-1.5">{count} states</span>
+      <span className="shrink-0 border-r border-etch px-3 py-1.5 text-ochre">
+        {selected ?? "idle"}
+      </span>
+      <span className="shrink-0 border-r border-etch px-3 py-1.5">sun {sun}°</span>
+      <span className="shrink-0 border-r border-etch px-3 py-1.5">moon {moon}°</span>
+      <span className="min-w-0 flex-1 px-3 py-1.5 text-right text-dimmer">
+        drag to orbit · scroll zoom · tap a country
+      </span>
+    </div>
+  );
+}
+
+function TideGauge({ countries }: { countries: CountryFeat[] }) {
+  const selected = useAtlas((s) => s.selected);
+  const tideGain = useAtlas((s) => s.tideGain);
+  const showTides = useAtlas((s) => s.showTides);
+  const sun = useSunDeg();
+  const moon = useMoonDeg();
+
+  const hit = selected ? countries.find((x) => x.name === selected) : undefined;
+  const at = hit ? centroidOf(hit) : HOME;
+  const where = hit ? selected : HOME.label;
+  const raw = tideAt(at.lat, at.lon, moon, sun);
+  const m = tideMeters(raw, showTides ? tideGain : 0);
+  const width = Math.min(50, (Math.abs(raw) / 1.5) * 50);
+
+  return (
+    <div className="pointer-events-none absolute bottom-2 left-2 z-20 max-w-[min(280px,46vw)]">
+      <div className="mb-1 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.16em] text-dimmer">
+        <span>Tide · {where}</span>
+        <b className="font-medium text-ochre">{springLabel(moon, sun)}</b>
+      </div>
+      <div className={`font-mono text-xl tabular-nums ${m >= 0 ? "text-defender" : "text-rust"}`}>
+        {m >= 0 ? "+" : ""}
+        {m.toFixed(2)}
+        <span className="ml-1 text-2xs text-dimmer">m</span>
+      </div>
+      <div className="relative mt-1 h-1 bg-etch">
+        <i
+          className={`absolute top-0 bottom-0 ${m >= 0 ? "bg-defender" : "bg-rust"}`}
+          style={{ width: `${width}%`, left: raw >= 0 ? "50%" : `${50 - width}%` }}
+        />
+        <i className="absolute left-1/2 top-[-3px] h-2.5 w-px bg-silk" />
+      </div>
+      <div className="mt-1 font-mono text-2xs uppercase tracking-wide text-dimmer">
+        lunar P2 + 0.46 solar · <Tag kind="x">declared</Tag>
+      </div>
+    </div>
+  );
+}
+
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+  format,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+  format: (v: number) => string;
+}) {
+  const id = `inst-${label.replace(/\W+/g, "-").toLowerCase()}`;
+  return (
+    <>
+      <label
+        htmlFor={id}
+        className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer"
+      >
+        {label} <b className="float-right font-medium text-ochre">{format(value)}</b>
+      </label>
+      <input
+        id={id}
+        className="inst"
+        type="range"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(+e.target.value)}
+      />
+    </>
+  );
+}
+
+function ShellSection() {
   const nightGain = useAtlas((s) => s.nightGain);
   const bump = useAtlas((s) => s.bump);
-  const sunLon = useAtlas((s) => s.sunLon);
-  const moonLon = useAtlas((s) => s.moonLon);
   const tideGain = useAtlas((s) => s.tideGain);
-  const panelOpen = useAtlas((s) => s.panelOpen);
-  const cupola = useAtlas((s) => s.cupola);
-  const autoSun = useAtlas((s) => s.autoSun);
-  const autoMoon = useAtlas((s) => s.autoMoon);
-  const autoRotate = useAtlas((s) => s.autoRotate);
-  const showAtmosphere = useAtlas((s) => s.showAtmosphere);
-  const showClouds = useAtlas((s) => s.showClouds);
-  const showBorders = useAtlas((s) => s.showBorders);
-  const showCage = useAtlas((s) => s.showCage);
-  const showIss = useAtlas((s) => s.showIss);
-  const showMoon = useAtlas((s) => s.showMoon);
-  const showTides = useAtlas((s) => s.showTides);
+  const sun = useSunDeg();
+  const moon = useMoonDeg();
+  const st = useAtlas.getState;
+
+  return (
+    <section className="border-b border-etch p-3">
+      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+        <span className="text-ochre">§03</span>
+        <span className="font-semibold tracking-[0.2em]">Shell</span>
+        <span className="text-dimmer">FIG.4</span>
+      </div>
+      <Slider
+        label="Night gain"
+        min={40}
+        max={300}
+        value={Math.round(nightGain * 100)}
+        onChange={(v) => st().setNightGain(v / 100)}
+        format={(v) => `×${(v / 100).toFixed(2)}`}
+      />
+      <Slider
+        label="Relief / bump"
+        min={0}
+        max={250}
+        value={Math.round(bump * 100)}
+        onChange={(v) => st().setBump(v / 100)}
+        format={(v) => `×${(v / 100).toFixed(2)}`}
+      />
+      <Slider
+        label="Subsolar longitude"
+        min={0}
+        max={359}
+        value={sun % 360}
+        onChange={(v) => {
+          st().setAutoSun(false);
+          st().setSunLon(v);
+        }}
+        format={(v) => `${v}°`}
+      />
+      <Slider
+        label="Moon longitude"
+        min={0}
+        max={359}
+        value={(moon + 360) % 360}
+        onChange={(v) => {
+          st().setAutoMoon(false);
+          st().setMoonLon(v);
+        }}
+        format={(v) => `${v}°`}
+      />
+      <Slider
+        label="Tide gain"
+        min={0}
+        max={220}
+        value={Math.round(tideGain * 100)}
+        onChange={(v) => st().setTideGain(v / 100)}
+        format={(v) => `×${(v / 100).toFixed(2)}`}
+      />
+      <div className="mt-3 grid grid-cols-2 gap-1">
+        <LayerToggle id="showAtmosphere" label="atmosphere" />
+        <LayerToggle id="showClouds" label="clouds" />
+        <LayerToggle id="showBorders" label="borders" />
+        <LayerToggle id="showIss" label="ISS" />
+        <LayerToggle id="showMoon" label="moon" />
+        <LayerToggle id="showTides" label="tides" />
+        <LayerToggle id="showCage" label="cage" />
+        <LayerToggle id="cupola" label="cupola" />
+        <LayerToggle id="autoSun" label="sun drift" />
+        <LayerToggle id="autoMoon" label="moon drift" />
+        <LayerToggle id="autoRotate" label="orbit" />
+      </div>
+    </section>
+  );
+}
+
+const CountryList = memo(function CountryList({ names }: { names: string[] }) {
+  return (
+    <datalist id="atlas-countries">
+      {names.map((n) => (
+        <option key={n} value={n} />
+      ))}
+    </datalist>
+  );
+});
+
+function TiltSection() {
   const tiltOn = useAtlas((s) => s.tiltOn);
-  const [copied, setCopied] = useState(false);
-  const [search, setSearch] = useState("");
   const [gyro, setGyro] = useState({ a: "—", b: "—", g: "—" });
 
   useEffect(() => {
+    // Only listen while tilt is live — the handler fires ~60 Hz per device.
+    if (!tiltOn) {
+      setGyro({ a: "—", b: "—", g: "—" });
+      return;
+    }
     const on = (e: DeviceOrientationEvent) => {
       if (e.alpha == null) return;
       setGyro({
-        a: e.alpha.toFixed(0) + "°",
-        b: (e.beta ?? 0).toFixed(0) + "°",
-        g: (e.gamma ?? 0).toFixed(0) + "°",
+        a: `${e.alpha.toFixed(0)}°`,
+        b: `${(e.beta ?? 0).toFixed(0)}°`,
+        g: `${(e.gamma ?? 0).toFixed(0)}°`,
       });
     };
     window.addEventListener("deviceorientation", on);
     return () => window.removeEventListener("deviceorientation", on);
-  }, []);
+  }, [tiltOn]);
+
+  return (
+    <section className="p-3">
+      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+        <span className="text-ochre">§04</span>
+        <span className="font-semibold tracking-[0.2em]">Device tilt</span>
+        <span className="text-dimmer">FIG.5</span>
+      </div>
+      <button
+        type="button"
+        aria-pressed={tiltOn}
+        className={`flex min-h-11 w-full items-center justify-between border px-3 font-mono text-xs uppercase tracking-[0.16em] ${
+          tiltOn ? "border-rust text-rust" : "border-ochre text-ochre"
+        }`}
+        onClick={async () => {
+          const st = useAtlas.getState();
+          if (st.tiltOn) {
+            st.toggle("tiltOn");
+            return;
+          }
+          const DOE = DeviceOrientationEvent as unknown as {
+            requestPermission?: () => Promise<string>;
+          };
+          if (typeof DOE.requestPermission === "function") {
+            try {
+              if ((await DOE.requestPermission()) !== "granted") return;
+            } catch {
+              return;
+            }
+          }
+          st.toggle("tiltOn");
+        }}
+      >
+        {tiltOn ? "Stop · recalibrate" : "Use device tilt"}
+        <span aria-hidden>{tiltOn ? "▮▮" : "◉"}</span>
+      </button>
+      <div className="mt-2 grid grid-cols-3 gap-px bg-etch">
+        {[
+          ["α", gyro.a],
+          ["β", gyro.b],
+          ["γ", gyro.g],
+        ].map(([k, v]) => (
+          <div key={k} className="bg-substrate-2 px-2 py-2 text-center">
+            <div className="font-mono text-[8px] tracking-[0.16em] text-dimmer">{k}</div>
+            <div className="font-mono text-sm tabular-nums">{v}</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 font-mono text-2xs uppercase tracking-wide text-dimmer">
+        {tiltOn ? "Live — current pose is home" : "Tilt off — drag to rotate"}
+      </p>
+      <div className="mt-3 font-mono text-2xs uppercase tracking-wide text-dimmer">
+        overlay <Tag kind="x">declared</Tag> · textures <Tag kind="m">measured</Tag>
+      </div>
+    </section>
+  );
+}
+
+export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet: () => void }) {
+  const selected = useAtlas((s) => s.selected);
+  const panelOpen = useAtlas((s) => s.panelOpen);
+  const site = useAtlas((s) => s.focus?.site);
+  const [copied, setCopied] = useState(false);
+  const [search, setSearch] = useState("");
 
   const names = useMemo(() => countries.map((c) => c.name).sort(), [countries]);
 
   const goCountry = (n: string) => {
     const c = countries.find((x) => x.name === n);
     if (!c) return;
-    const ll = centroidOf(c);
     useAtlas.getState().select(n);
-    useAtlas.getState().flyTo({ ...ll, label: n });
+    useAtlas.getState().flyTo({ ...centroidOf(c), label: n });
   };
-
-  const gauge = (() => {
-    let lat = NILE.lat;
-    let lon = NILE.lon;
-    let where = "Nile";
-    if (selected) {
-      const c = countries.find((x) => x.name === selected);
-      if (c) {
-        const ll = centroidOf(c);
-        lat = ll.lat;
-        lon = ll.lon;
-        where = selected;
-      }
-    }
-    const raw = tideAt(lat, lon, moonLon, sunLon);
-    const m = tideMeters(raw, showTides ? tideGain : 0);
-    const kind = springLabel(moonLon, sunLon);
-    return { m, kind, where, raw };
-  })();
 
   return (
     <>
       <header className="pointer-events-auto absolute inset-x-2 top-2 z-20 grid grid-cols-[1fr_auto] border border-etch bg-substrate md:grid-cols-[1fr_auto_auto_auto]">
         <div className="flex items-center gap-2 border-r border-etch px-3 py-2">
-          <span className="font-display text-sm font-bold tracking-[0.18em]">
+          <button
+            type="button"
+            onClick={onQuiet}
+            title="back to the quiet edition"
+            className="font-display text-sm font-bold tracking-[0.18em]"
+          >
             GROK<span className="text-ochre">.ATLAS</span>
-          </span>
+          </button>
           <span className="hidden font-mono text-2xs uppercase tracking-[0.16em] text-dimmer sm:inline">
             / cupola / v2.0
           </span>
         </div>
         <div className="hidden items-center gap-2 border-r border-etch px-3 py-2 md:flex">
-          <span className="font-mono text-2xs uppercase tracking-[0.16em] text-dimmer">Section</span>
+          <span className="font-mono text-2xs uppercase tracking-[0.16em] text-dimmer">
+            Section
+          </span>
           <span className="font-mono text-xs font-medium text-ochre">§G.002</span>
         </div>
         <div className="hidden items-center gap-2 border-r border-etch px-3 py-2 md:flex">
@@ -172,71 +393,25 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
         </div>
       </header>
 
-      <div className="pointer-events-none absolute inset-x-2 top-[52px] z-20 flex overflow-x-auto border border-etch bg-substrate font-mono text-2xs uppercase tracking-[0.14em] text-dim">
-        <span className="shrink-0 border-r border-etch px-3 py-1.5">{countries.length} states</span>
-        <span className="shrink-0 border-r border-etch px-3 py-1.5 text-ochre">
-          {selected ?? "idle"}
-        </span>
-        <span className="shrink-0 border-r border-etch px-3 py-1.5">sun {sunLon.toFixed(0)}°</span>
-        <span className="shrink-0 border-r border-etch px-3 py-1.5">moon {moonLon.toFixed(0)}°</span>
-        <span className="min-w-0 flex-1 px-3 py-1.5 text-right text-dimmer">
-          drag to orbit · scroll zoom · tap a country
-        </span>
-      </div>
+      <Ticker count={countries.length} />
 
       <div className="pointer-events-none absolute left-4 top-1/2 z-20 hidden -translate-y-1/2 font-mono text-2xs leading-6 tracking-wide text-dim md:block">
-        <div>
-          <i className="mr-2 inline-block h-1.5 w-1.5 bg-ochre" />
-          city lights
-        </div>
-        <div>
-          <i className="mr-2 inline-block h-1.5 w-1.5 bg-lichen" />
-          airglow limb
-        </div>
-        <div>
-          <i className="mr-2 inline-block h-1.5 w-1.5 bg-bone" />
-          moon
-        </div>
-        <div>
-          <i className="mr-2 inline-block h-1.5 w-1.5 bg-defender" />
-          high tide
-        </div>
-        <div>
-          <i className="mr-2 inline-block h-1.5 w-1.5 bg-silk" />
-          Yerevan
-        </div>
-        <div>
-          <i className="mr-2 inline-block h-1.5 w-1.5 bg-rust" />
-          Ararat
-        </div>
+        {[
+          ["bg-ochre", "city lights"],
+          ["bg-lichen", "airglow limb"],
+          ["bg-bone", "moon"],
+          ["bg-defender", "high tide"],
+          ["bg-silk", "Yerevan"],
+          ["bg-rust", "Ararat"],
+        ].map(([dot, label]) => (
+          <div key={label}>
+            <i className={`mr-2 inline-block h-1.5 w-1.5 ${dot}`} />
+            {label}
+          </div>
+        ))}
       </div>
 
-      <div className="pointer-events-none absolute bottom-2 left-2 z-20 max-w-[min(280px,46vw)]">
-        <div className="mb-1 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.16em] text-dimmer">
-          <span>Tide · {gauge.where}</span>
-          <b className="font-medium text-ochre">{gauge.kind}</b>
-        </div>
-        <div
-          className={`font-mono text-xl tabular-nums ${gauge.m >= 0 ? "text-defender" : "text-rust"}`}
-        >
-          {gauge.m >= 0 ? "+" : ""}
-          {gauge.m.toFixed(2)}
-          <span className="ml-1 text-2xs text-dimmer">m</span>
-        </div>
-        <div className="relative mt-1 h-1 bg-etch">
-          <i
-            className={`absolute top-0 bottom-0 ${gauge.m >= 0 ? "bg-defender" : "bg-rust"}`}
-            style={{
-              width: `${Math.min(50, (Math.abs(gauge.raw) / 1.5) * 50)}%`,
-              left: gauge.raw >= 0 ? "50%" : `${50 - Math.min(50, (Math.abs(gauge.raw) / 1.5) * 50)}%`,
-            }}
-          />
-          <i className="absolute left-1/2 top-[-3px] h-2.5 w-px bg-silk" />
-        </div>
-        <div className="mt-1 font-mono text-2xs uppercase tracking-wide text-dimmer">
-          lunar P2 + 0.46 solar · <Tag kind="x">declared</Tag>
-        </div>
-      </div>
+      <TideGauge countries={countries} />
 
       <div className="pointer-events-none absolute bottom-2 right-2 z-20 hidden text-right font-mono text-2xs leading-5 tracking-wide text-dimmer sm:block">
         textures <span className="text-lichen">MEASURED</span>
@@ -248,6 +423,8 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
 
       <button
         type="button"
+        aria-expanded={panelOpen}
+        aria-controls="atlas-panel"
         className="pointer-events-auto absolute right-2 top-[88px] z-30 min-h-11 border border-ochre bg-substrate px-3 font-mono text-2xs uppercase tracking-[0.16em] text-ochre md:hidden"
         onClick={() => useAtlas.getState().toggle("panelOpen")}
       >
@@ -255,6 +432,7 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
       </button>
 
       <aside
+        id="atlas-panel"
         className={`hud-scroll pointer-events-auto absolute right-2 top-[88px] z-20 w-[min(320px,calc(100%-1rem))] overflow-y-auto border border-etch bg-substrate md:bottom-[52px] md:top-[88px] ${
           panelOpen ? "block max-h-[min(70dvh,640px)] md:max-h-none" : "hidden md:block"
         }`}
@@ -291,12 +469,7 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
                 className="flex min-h-11 items-center justify-between border border-etch px-2 text-left"
                 onClick={() => {
                   useAtlas.getState().select(null);
-                  useAtlas.getState().flyTo({
-                    lat: s.lat,
-                    lon: s.lon,
-                    label: s.label,
-                    dist: s.dist,
-                  });
+                  useAtlas.getState().flyTo(focusOf(s));
                 }}
               >
                 <span className="font-mono text-xs text-silk">{s.label}</span>
@@ -308,23 +481,20 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
             <input
               className="min-h-11 min-w-0 flex-1 border border-etch bg-transparent px-2 font-mono text-xs"
               list="atlas-countries"
+              aria-label="Find country"
               placeholder="find country…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;
-                const n = names.find((x) => x.toLowerCase() === search.toLowerCase());
+                const n = names.find((x) => x.toLowerCase() === search.trim().toLowerCase());
                 if (n) {
                   goCountry(n);
                   setSearch("");
                 }
               }}
             />
-            <datalist id="atlas-countries">
-              {names.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
+            <CountryList names={names} />
           </div>
           <button
             type="button"
@@ -332,154 +502,23 @@ export function Hud({ countries }: { countries: CountryFeat[] }) {
             onClick={async () => {
               const p = new URLSearchParams();
               if (selected) p.set("c", selected);
+              else if (site) p.set("site", site);
               const url = `${location.origin}${location.pathname}${p.toString() ? `?${p}` : ""}`;
-              await navigator.clipboard?.writeText(url).catch(() => {});
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1200);
+              try {
+                await navigator.clipboard?.writeText(url);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1200);
+              } catch {
+                // clipboard blocked (insecure origin / denied) — leave the label alone
+              }
             }}
           >
             {copied ? "Copied" : "Copy view"}
           </button>
         </section>
 
-        <section className="border-b border-etch p-3">
-          <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-            <span className="text-ochre">§03</span>
-            <span className="font-semibold tracking-[0.2em]">Shell</span>
-            <span className="text-dimmer">FIG.4</span>
-          </div>
-          <label className="mt-1 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer">
-            Night gain{" "}
-            <b className="float-right font-medium text-ochre">×{nightGain.toFixed(2)}</b>
-          </label>
-          <input
-            className="inst"
-            type="range"
-            min={40}
-            max={300}
-            value={Math.round(nightGain * 100)}
-            onChange={(e) => useAtlas.getState().setNightGain(+e.target.value / 100)}
-          />
-          <label className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer">
-            Relief / bump <b className="float-right font-medium text-ochre">×{bump.toFixed(2)}</b>
-          </label>
-          <input
-            className="inst"
-            type="range"
-            min={0}
-            max={250}
-            value={Math.round(bump * 100)}
-            onChange={(e) => useAtlas.getState().setBump(+e.target.value / 100)}
-          />
-          <label className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer">
-            Subsolar longitude{" "}
-            <b className="float-right font-medium text-ochre">{sunLon.toFixed(0)}°</b>
-          </label>
-          <input
-            className="inst"
-            type="range"
-            min={0}
-            max={359}
-            value={Math.round(sunLon)}
-            onChange={(e) => {
-              useAtlas.getState().setAutoSun(false);
-              useAtlas.getState().setSunLon(+e.target.value);
-            }}
-          />
-          <label className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer">
-            Moon longitude{" "}
-            <b className="float-right font-medium text-ochre">{moonLon.toFixed(0)}°</b>
-          </label>
-          <input
-            className="inst"
-            type="range"
-            min={0}
-            max={359}
-            value={Math.round((moonLon + 360) % 360)}
-            onChange={(e) => {
-              useAtlas.getState().setAutoMoon(false);
-              useAtlas.getState().setMoonLon(+e.target.value);
-            }}
-          />
-          <label className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer">
-            Tide gain <b className="float-right font-medium text-ochre">×{tideGain.toFixed(2)}</b>
-          </label>
-          <input
-            className="inst"
-            type="range"
-            min={0}
-            max={220}
-            value={Math.round(tideGain * 100)}
-            onChange={(e) => useAtlas.getState().setTideGain(+e.target.value / 100)}
-          />
-          <div className="mt-3 grid grid-cols-2 gap-1">
-            <LayerToggle id="showAtmosphere" label="atmosphere" on={showAtmosphere} />
-            <LayerToggle id="showClouds" label="clouds" on={showClouds} />
-            <LayerToggle id="showBorders" label="borders" on={showBorders} />
-            <LayerToggle id="showIss" label="ISS" on={showIss} />
-            <LayerToggle id="showMoon" label="moon" on={showMoon} />
-            <LayerToggle id="showTides" label="tides" on={showTides} />
-            <LayerToggle id="showCage" label="cage" on={showCage} />
-            <LayerToggle id="cupola" label="cupola" on={cupola} />
-            <LayerToggle id="autoSun" label="sun drift" on={autoSun} />
-            <LayerToggle id="autoMoon" label="moon drift" on={autoMoon} />
-            <LayerToggle id="autoRotate" label="orbit" on={autoRotate} />
-          </div>
-        </section>
-
-        <section className="p-3">
-          <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-            <span className="text-ochre">§04</span>
-            <span className="font-semibold tracking-[0.2em]">Device tilt</span>
-            <span className="text-dimmer">FIG.5</span>
-          </div>
-          <button
-            type="button"
-            className={`flex min-h-11 w-full items-center justify-between border px-3 font-mono text-xs uppercase tracking-[0.16em] ${
-              tiltOn ? "border-rust text-rust" : "border-ochre text-ochre"
-            }`}
-            onClick={async () => {
-              const st = useAtlas.getState();
-              if (st.tiltOn) {
-                st.toggle("tiltOn");
-                return;
-              }
-              const DOE = DeviceOrientationEvent as unknown as {
-                requestPermission?: () => Promise<string>;
-              };
-              if (typeof DOE.requestPermission === "function") {
-                try {
-                  const g = await DOE.requestPermission();
-                  if (g !== "granted") return;
-                } catch {
-                  return;
-                }
-              }
-              st.toggle("tiltOn");
-            }}
-          >
-            {tiltOn ? "Stop · recalibrate" : "Use device tilt"}
-            <span>{tiltOn ? "▮▮" : "◉"}</span>
-          </button>
-          <div className="mt-2 grid grid-cols-3 gap-px bg-etch">
-            {[
-              ["α", gyro.a],
-              ["β", gyro.b],
-              ["γ", gyro.g],
-            ].map(([k, v]) => (
-              <div key={k} className="bg-substrate-2 px-2 py-2 text-center">
-                <div className="font-mono text-[8px] tracking-[0.16em] text-dimmer">{k}</div>
-                <div className="font-mono text-sm tabular-nums">{v}</div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 font-mono text-2xs uppercase tracking-wide text-dimmer">
-            {tiltOn ? "Live — current pose is home" : "Tilt off — drag to rotate"}
-          </p>
-          <div className="mt-3 font-mono text-2xs uppercase tracking-wide text-dimmer">
-            overlay <Tag kind="x">declared</Tag> · textures <Tag kind="m">measured</Tag>
-          </div>
-        </section>
+        <ShellSection />
+        <TiltSection />
       </aside>
     </>
   );

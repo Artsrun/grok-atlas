@@ -1,7 +1,14 @@
 import { create } from "zustand";
-import { NILE } from "./geo";
+import { focusOf, HOME } from "./model.ts";
 
-export type Focus = { lat: number; lon: number; label?: string; dist?: number };
+export type Focus = {
+  lat: number;
+  lon: number;
+  label?: string;
+  dist?: number;
+  /** VIEWS id when this focus came from a named view — drives ?site= sharing. */
+  site?: string;
+};
 
 type LayerKey =
   | "showAtmosphere"
@@ -41,6 +48,8 @@ type AtlasState = {
   panelOpen: boolean;
   tiltOn: boolean;
   focus: Focus | null;
+  /** Bumped on every flyTo so the rig re-flies even to an identical target. */
+  flySeq: number;
   setNames: (n: string[]) => void;
   select: (name: string | null) => void;
   setSunLon: (v: number) => void;
@@ -53,13 +62,15 @@ type AtlasState = {
   setTideGain: (v: number) => void;
   toggle: (k: LayerKey) => void;
   flyTo: (f: Focus) => void;
+  /** Honour prefers-reduced-motion: park the sun, moon and auto-orbit. */
+  calmMotion: () => void;
   tickOrbits: (dt: number) => void;
 };
 
 export const useAtlas = create<AtlasState>((set, get) => ({
   names: [],
   selected: null,
-  sunLon: NILE.lon + 182,
+  sunLon: HOME.lon + 182,
   moonLon: 0,
   autoSun: true,
   autoMoon: true,
@@ -78,7 +89,8 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   cupola: true,
   panelOpen: false,
   tiltOn: false,
-  focus: { lat: NILE.lat, lon: NILE.lon, label: NILE.label, dist: 2.58 },
+  focus: focusOf(HOME),
+  flySeq: 0,
   setNames: (names) => set({ names }),
   select: (selected) => set({ selected }),
   setSunLon: (sunLon) => set({ sunLon }),
@@ -90,7 +102,8 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   setCloudOpacity: (cloudOpacity) => set({ cloudOpacity }),
   setTideGain: (tideGain) => set({ tideGain }),
   toggle: (k) => set({ [k]: !get()[k] } as Partial<AtlasState>),
-  flyTo: (focus) => set({ focus }),
+  flyTo: (focus) => set((s) => ({ focus, flySeq: s.flySeq + 1 })),
+  calmMotion: () => set({ autoSun: false, autoMoon: false, autoRotate: false }),
   tickOrbits: (dt) => {
     const s = get();
     const patch: Partial<AtlasState> = {};

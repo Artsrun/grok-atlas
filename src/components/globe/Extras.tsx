@@ -1,9 +1,10 @@
 import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ARARAT, ll2xyz, NILE, OBS } from "@/lib/atlas/geo";
 import { MOON_DIST, MOON_INC, MOON_RADIUS, moonXYZ } from "@/lib/atlas/tide";
+import { subsolarLat } from "@/lib/atlas/sun";
 import { useAtlas } from "@/lib/atlas/store";
 import { MOON_FRAG, MOON_VERT } from "./shaders";
 
@@ -22,6 +23,7 @@ export function Starfield({ count = 2600 }: { count?: number }) {
     g.setAttribute("position", new THREE.BufferAttribute(p, 3));
     return g;
   }, [count]);
+  useEffect(() => () => geo.dispose(), [geo]);
   return (
     <points geometry={geo}>
       <pointsMaterial color="#7c86a8" size={0.14} sizeAttenuation />
@@ -31,10 +33,12 @@ export function Starfield({ count = 2600 }: { count?: number }) {
 
 export function Cage() {
   const show = useAtlas((s) => s.showCage);
+  // Built once — an inline `new IcosahedronGeometry` leaks one per render.
+  const geo = useMemo(() => new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.32, 1)), []);
+  useEffect(() => () => geo.dispose(), [geo]);
   if (!show) return null;
   return (
-    <lineSegments>
-      <edgesGeometry args={[new THREE.IcosahedronGeometry(1.32, 1)]} />
+    <lineSegments geometry={geo}>
       <lineBasicMaterial color="#c89050" transparent opacity={0.18} />
     </lineSegments>
   );
@@ -104,6 +108,7 @@ export function Station() {
     g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
     return g;
   }, []);
+  useEffect(() => () => orbit.dispose(), [orbit]);
 
   useFrame((_, dt) => {
     if (!ref.current || !show) return;
@@ -179,6 +184,7 @@ export function Luna() {
     g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
     return g;
   }, []);
+  useEffect(() => () => orbit.dispose(), [orbit]);
 
   const uniforms = useMemo(
     () => ({
@@ -196,7 +202,7 @@ export function Luna() {
       group.current.position.set(p[0], p[1], p[2]);
       group.current.lookAt(0, 0, 0);
     }
-    const sun = ll2xyz(8, s.sunLon, 1);
+    const sun = ll2xyz(subsolarLat(s.sunLon), s.sunLon, 1);
     sunVec.set(sun[0], sun[1], sun[2]);
     if (mat.current) mat.current.uniforms.uSun.value.copy(sunVec);
   });
@@ -237,7 +243,7 @@ export function SunMarker() {
   useFrame(() => {
     if (!mesh.current) return;
     const lon = useAtlas.getState().sunLon;
-    const v = ll2xyz(8, lon, 18);
+    const v = ll2xyz(subsolarLat(lon), lon, 18);
     mesh.current.position.set(v[0], v[1], v[2]);
   });
   return (

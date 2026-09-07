@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
 import type { CountryFeat } from "@/lib/atlas/geo";
 import { centroidOf, loadCountries } from "@/lib/atlas/geo";
-import { VIEWS } from "@/lib/atlas/model";
+import { focusOf, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { GlobeCanvas } from "@/components/globe/GlobeCanvas";
 import { BootScreen } from "./BootScreen";
 import { Hud } from "./Hud";
 import { QuietHud } from "./QuietHud";
 
-function editionFromUrl(): "2" | "3" {
-  return new URLSearchParams(location.search).get("v") === "2" ? "2" : "3";
-}
+type Edition = "2" | "3";
+
+const editionFromUrl = (): Edition =>
+  new URLSearchParams(location.search).get("v") === "2" ? "2" : "3";
 
 export function AtlasApp() {
   const [countries, setCountries] = useState<CountryFeat[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [edition, setEdition] = useState<"2" | "3">(editionFromUrl);
+  const [edition, setEdition] = useState<Edition>(editionFromUrl);
   const cupola = useAtlas((s) => s.cupola);
 
   useEffect(() => {
@@ -30,7 +31,8 @@ export function AtlasApp() {
         const country = p.get("c");
         if (site) {
           const v = VIEWS.find((x) => x.id === site);
-          if (v) useAtlas.getState().flyTo({ lat: v.lat, lon: v.lon, label: v.label });
+          // dist matters: ?site=moon is unreadable from the cupola radius.
+          if (v) useAtlas.getState().flyTo(focusOf(v));
         } else if (country) {
           const hit = c.find((x) => x.name.toLowerCase() === country.toLowerCase());
           if (hit) {
@@ -48,12 +50,31 @@ export function AtlasApp() {
     };
   }, []);
 
+  // Edition is a real navigation step: pushState so Back leaves the instrument,
+  // and popstate so Back/Forward actually swap the HUD.
   useEffect(() => {
+    if (editionFromUrl() === edition) return;
     const url = new URL(location.href);
     if (edition === "2") url.searchParams.set("v", "2");
     else url.searchParams.delete("v");
-    history.replaceState(null, "", url);
+    history.pushState(null, "", url);
   }, [edition]);
+
+  useEffect(() => {
+    const onPop = () => setEdition(editionFromUrl());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => {
+      if (mq.matches) useAtlas.getState().calmMotion();
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   if (err) {
     return (
@@ -84,7 +105,7 @@ export function AtlasApp() {
       ) : null}
       <div className="pointer-events-none absolute inset-0 z-20">
         {edition === "2" ? (
-          <Hud countries={countries} />
+          <Hud countries={countries} onQuiet={() => setEdition("3")} />
         ) : (
           <QuietHud onInstrument={() => setEdition("2")} />
         )}
