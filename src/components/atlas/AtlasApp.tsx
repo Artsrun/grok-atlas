@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CountryFeat } from "@/lib/atlas/geo";
-import { centroidOf, loadCountries } from "@/lib/atlas/geo";
+import { loadCountries } from "@/lib/atlas/geo";
+import { focusForCountry } from "@/lib/atlas/fly";
 import { pinHere, pollIss } from "@/lib/atlas/locate";
 import { focusOf, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
@@ -38,9 +39,8 @@ export function AtlasApp() {
         } else if (country) {
           const hit = c.find((x) => x.name.toLowerCase() === country.toLowerCase());
           if (hit) {
-            const ll = centroidOf(hit);
             useAtlas.getState().select(hit.name);
-            useAtlas.getState().flyTo({ ...ll, label: hit.name });
+            useAtlas.getState().flyTo(focusForCountry(hit));
           }
         } else {
           pinHere(true).catch(() => {});
