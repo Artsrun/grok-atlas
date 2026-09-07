@@ -23,7 +23,7 @@ void main() {
   float solar = 0.5 * (3.0 * su * su - 1.0);
   float tide = (lunar + 0.46 * solar) * ocean;
   vTide = tide;
-  vec3 displaced = position + n * tide * uTideAmp * 0.034;
+  vec3 displaced = position + n * tide * uTideAmp * 0.018;
   vec4 wp = modelMatrix * vec4(displaced, 1.0);
   vPos = wp.xyz;
   mat3 nm = mat3(modelMatrix);
@@ -64,46 +64,32 @@ void main() {
   vec3 H = normalize(L + V);
 
   float ndl = dot(N, L);
-  float day = smoothstep(-0.10, 0.26, ndl);
-  float twilight = 1.0 - smoothstep(0.0, 0.38, abs(ndl));
+  float dayStrength = smoothstep(-0.25, 0.50, ndl);
 
   vec3 dayC = texture2D(uDay, vUv).rgb;
   vec3 nightC = texture2D(uNight, vUv).rgb;
   float lum = max(nightC.r, max(nightC.g, nightC.b));
-  vec3 lights = nightC * mix(2.4, 8.2, lum) * uNightGain;
-  lights *= vec3(1.35, 0.88, 0.42);
+  vec3 lights = nightC * mix(1.6, 4.8, lum) * uNightGain;
 
   float specMask = texture2D(uSpec, vUv).r;
-  vec3 albedo = dayC;
-  albedo *= mix(0.055, 1.0, day);
+  vec3 lit = dayC * (0.12 + 0.88 * max(ndl, 0.0));
+  vec3 color = mix(lights, lit, dayStrength);
 
-  vec3 color = albedo * (0.07 + 0.93 * max(ndl, 0.0));
-  float nightAmt = 1.0 - smoothstep(-0.02, 0.38, ndl);
-  color += vec3(0.012, 0.02, 0.045) * specMask * nightAmt;
-  color += lights * nightAmt * mix(1.0, 0.18, specMask);
-  color += lights * lights * 0.45 * nightAmt;
+  float spec = pow(max(dot(N, H), 0.0), 48.0) * specMask * dayStrength;
+  color += vec3(0.78, 0.88, 1.0) * spec * 0.65;
 
-  float spec = pow(max(dot(N, H), 0.0), 52.0) * specMask * day;
-  color += vec3(0.82, 0.91, 1.0) * spec * 0.72;
-  color += vec3(1.0, 0.36, 0.10) * twilight * specMask * 0.16;
+  vec3 atmoDay = vec3(0.302, 0.698, 1.0);
+  vec3 atmoTwilight = vec3(0.737, 0.286, 0.043);
+  vec3 atmo = mix(atmoTwilight, atmoDay, smoothstep(-0.25, 0.75, ndl));
+  float fres = pow(1.0 - max(dot(normalize(vNormal), V), 0.0), 2.0);
+  float atmoMix = smoothstep(-0.5, 1.0, ndl) * fres;
+  color = mix(color, atmo, clamp(atmoMix, 0.0, 1.0) * 0.38);
 
-  float hi = max(vTide, 0.0);
-  float lo = max(-vTide, 0.0);
   float k = clamp(uTideAmp, 0.0, 2.4);
-  color += vec3(0.12, 0.48, 0.72) * specMask * hi * 0.78 * k;
-  color += vec3(0.55, 0.86, 1.0) * spec * hi * 0.7 * k;
-  color -= vec3(0.07, 0.04, 0.02) * specMask * lo * 0.5 * k;
+  color += vec3(0.10, 0.40, 0.66) * specMask * max(vTide, 0.0) * 0.45 * k;
 
   vec4 a = texture2D(uAtlas, vUv);
   color = mix(color, mix(color, a.rgb, 0.88), a.a * uAtlasMix);
-
-  float fres = pow(1.0 - max(dot(normalize(vNormal), V), 0.0), 2.8);
-  vec3 rimDay = vec3(0.32, 0.58, 1.0);
-  vec3 rimNight = vec3(0.55, 0.92, 0.32);
-  vec3 rimTerm = vec3(1.0, 0.48, 0.14);
-  vec3 rim = mix(rimNight, rimDay, day);
-  rim = mix(rim, rimTerm, twilight);
-  color += rim * fres * 0.42;
 
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
@@ -115,7 +101,7 @@ export const ATMO_VERT = /* glsl */ `
 varying vec3 vNormal;
 varying vec3 vPos;
 void main() {
-  vNormal = normalize(normalMatrix * normal);
+  vNormal = normalize(mat3(modelMatrix) * normal);
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vPos = wp.xyz;
   gl_Position = projectionMatrix * viewMatrix * wp;
@@ -132,21 +118,15 @@ varying vec3 vPos;
 void main() {
   vec3 n = normalize(vNormal);
   vec3 v = normalize(uCamPos - vPos);
-  float ndv = abs(dot(n, v));
-  float fres = pow(1.0 - ndv, mix(2.2, 3.6, uInner));
+  float fres = pow(1.0 - abs(dot(n, v)), 2.6);
   float sun = dot(n, normalize(uSun));
-  float night = smoothstep(0.25, -0.15, sun);
-  float term = pow(1.0 - abs(sun), 3.0);
-
-  vec3 dayCol = vec3(0.28, 0.52, 1.0);
-  vec3 sunset = vec3(1.0, 0.48, 0.12);
-  vec3 airglow = vec3(0.78, 0.86, 0.28);
-  vec3 col = mix(dayCol, airglow, night);
-  col = mix(col, sunset, term * 0.9);
-
-  float alpha = fres * mix(1.0, 0.52, night);
-  if (uInner > 0.5) alpha *= 0.55;
-  gl_FragColor = vec4(col * 1.15, alpha);
+  float day = smoothstep(-0.5, 1.0, sun);
+  vec3 atmoDay = vec3(0.302, 0.698, 1.0);
+  vec3 atmoTwilight = vec3(0.737, 0.286, 0.043);
+  vec3 col = mix(atmoTwilight, atmoDay, smoothstep(-0.25, 0.75, sun));
+  float alpha = pow(clamp((fres - 0.27) / 0.27, 0.0, 1.0), 3.0) * day;
+  if (uInner > 0.5) alpha *= 0.45;
+  gl_FragColor = vec4(col, alpha * 0.72);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
@@ -155,13 +135,10 @@ void main() {
 export const CLOUD_VERT = /* glsl */ `
 varying vec2 vUv;
 varying vec3 vNormal;
-varying vec3 vPos;
 void main() {
   vUv = uv;
-  vNormal = normalize(normalMatrix * normal);
-  vec4 wp = modelMatrix * vec4(position, 1.0);
-  vPos = wp.xyz;
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  vNormal = normalize(mat3(modelMatrix) * normal);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
 
@@ -172,15 +149,15 @@ uniform float uOpacity;
 uniform float uTime;
 varying vec2 vUv;
 varying vec3 vNormal;
-varying vec3 vPos;
 
 void main() {
-  vec2 uv = vUv + vec2(uTime * 0.0018, 0.0);
+  vec2 uv = vUv + vec2(uTime * 0.0012, 0.0);
   float c = texture2D(uClouds, uv).r;
+  float strength = smoothstep(0.2, 1.0, c);
   float ndl = dot(normalize(vNormal), normalize(uSun));
-  float day = smoothstep(-0.1, 0.3, ndl);
-  float a = c * uOpacity * mix(0.08, 0.78, day);
-  vec3 col = mix(vec3(0.55, 0.58, 0.7), vec3(1.0), day);
+  float day = smoothstep(-0.15, 0.35, ndl);
+  float a = strength * uOpacity * mix(0.06, 0.72, day);
+  vec3 col = mix(vec3(0.45, 0.48, 0.58), vec3(1.0), day);
   gl_FragColor = vec4(col, a);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -189,10 +166,10 @@ void main() {
 
 export const MOON_VERT = /* glsl */ `
 varying vec2 vUv;
-varying vec3 vN;
+varying vec3 vWorldN;
 void main() {
   vUv = uv;
-  vN = normalize(normalMatrix * normal);
+  vWorldN = normalize(mat3(modelMatrix) * normal);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -201,12 +178,12 @@ export const MOON_FRAG = /* glsl */ `
 uniform sampler2D uMap;
 uniform vec3 uSun;
 varying vec2 vUv;
-varying vec3 vN;
+varying vec3 vWorldN;
 void main() {
   vec3 albedo = texture2D(uMap, vUv).rgb;
-  float ndl = max(dot(normalize(vN), normalize(uSun)), 0.0);
-  vec3 color = albedo * (0.08 + 1.05 * ndl);
-  color += albedo * vec3(0.12, 0.16, 0.24) * (1.0 - ndl);
+  float ndl = dot(normalize(vWorldN), normalize(uSun));
+  float day = smoothstep(-0.08, 0.22, ndl);
+  vec3 color = albedo * mix(0.04, 1.12, day);
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>

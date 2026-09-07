@@ -16,14 +16,12 @@ import { HOME } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { Earth } from "./Earth";
 import { Borders } from "./Borders";
-import { Cage, Luna, SitePins, Starfield, Station, SunMarker } from "./Extras";
+import { Cage, HerePin, Luna, Starfield, Station, SunLight } from "./Extras";
 
 const HOME_POS = ll2xyz(HOME.lat, HOME.lon, HOME.dist);
 const FLY_SEC = 1.45;
-/** Camera counts as "already there" inside this angle (rad) and radius delta. */
 const ARRIVED_ANGLE = 0.014;
 const ARRIVED_RADIUS = 0.04;
-/** Pointer travel (px) above which an up event is a drag, not a tap. */
 const TAP_SLOP = 6;
 
 function OverlayTexture({
@@ -102,12 +100,11 @@ function Rig() {
     fromR.current = r;
     toR.current = wantR;
     flyT.current = 0;
-    // flySeq drives this: re-selecting an identical target must still re-fly.
   }, [flySeq, focus, camera]);
 
   useFrame((_, dt) => {
     const d = Math.min(dt, 0.05);
-    useAtlas.getState().tickOrbits(d);
+    useAtlas.getState().tickOrbits();
     const st = useAtlas.getState();
     const c = controls.current;
     const flying = flyT.current < 1;
@@ -131,7 +128,7 @@ function Rig() {
       enableDamping
       dampingFactor={0.065}
       minDistance={1.42}
-      maxDistance={11}
+      maxDistance={14}
       autoRotate={autoRotate && !tiltOn}
       autoRotateSpeed={0.07}
       rotateSpeed={0.48}
@@ -150,8 +147,6 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
 
   useEffect(() => {
     const el = gl.domElement;
-    // One tap = one primary pointer down/up pair that barely moved. A pinch
-    // ends with a non-primary up and must never register as a country pick.
     let start: { id: number; x: number; y: number } | null = null;
     const down = (e: PointerEvent) => {
       start = e.isPrimary ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
@@ -164,8 +159,6 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
       start = null;
       if (!from || from.id !== e.pointerId) return;
       if (Math.hypot(e.clientX - from.x, e.clientY - from.y) > TAP_SLOP) return;
-      // Raycast the earth alone — the starfield and border lines carry tens of
-      // thousands of primitives and none of them are pickable.
       const earth = scene.getObjectByName("earth");
       if (!earth) return;
       const rect = el.getBoundingClientRect();
@@ -243,13 +236,13 @@ function Scene({
   return (
     <>
       <color attach="background" args={["#05070c"]} />
-      <ambientLight intensity={0.22} />
+      <ambientLight intensity={0.16} />
       <Starfield />
-      <SunMarker />
+      <SunLight />
       <Luna />
       <Earth atlasTex={atlasTex} />
       <Borders countries={countries} />
-      <SitePins />
+      <HerePin />
       <Station />
       <Cage />
       <OverlayTexture countries={countries} texture={atlasTex} />
@@ -277,7 +270,7 @@ export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
   return (
     <Canvas
       className="h-full w-full touch-none"
-      camera={{ fov: 52, near: 0.08, far: 220, position: HOME_POS }}
+      camera={{ fov: 42, near: 0.08, far: 220, position: HOME_POS }}
       dpr={[1, 1.75]}
       gl={{
         antialias: true,
@@ -287,7 +280,7 @@ export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
       onCreated={({ gl }) => {
         gl.setClearColor("#05070c");
         gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.12;
+        gl.toneMappingExposure = 1.05;
       }}
     >
       <Suspense fallback={null}>
