@@ -6,7 +6,8 @@ Home camera is the Nile Delta / Eastern Mediterranean — the cupola night-limb 
 
 ## Controls
 
-- **Orbit** — drag. Pinch / wheel to zoom
+- **Orbit** — drag. Pinch / wheel to zoom. Touch gets a heavier throw and a larger tap slop so a drag does not pick a country.
+- **Toolbox** — `?v=2` instrument. Desktop: right rail, hover tips, pointer section. Phone: bottom chips + sheet, large sliders, device tilt.
 - **Country** — tap to inspect and fly to centroid
 - **Views** — Nile Delta, Yerevan, Ararat, Europe, Americas, West Pacific, Lunar stand
 - **Layers** — atmosphere, clouds, borders, cage, ISS, moon, tides, cupola vignette, auto-sun, auto-moon, auto-rotate
