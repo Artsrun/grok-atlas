@@ -46,6 +46,8 @@ uniform float uAtlasMix;
 uniform float uNightGain;
 uniform float uBump;
 uniform float uTideAmp;
+uniform float uGrainLights;
+uniform float uGrainRelief;
 
 varying vec2 vUv;
 varying vec3 vPos;
@@ -54,9 +56,27 @@ varying vec3 vTangent;
 varying vec3 vBitangent;
 varying float vTide;
 
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+float grain2(vec2 uv) {
+  float a = hash21(uv);
+  float b = hash21(uv * 2.13 + 17.1);
+  float c = hash21(uv * 4.71 + 9.2);
+  return a * 0.55 + b * 0.30 + c * 0.15;
+}
+
 void main() {
   vec3 nTex = texture2D(uNormal, vUv).xyz * 2.0 - 1.0;
   nTex.xy *= uBump;
+  if (uGrainRelief > 0.001) {
+    float rx = grain2(vUv * 420.0);
+    float ry = grain2(vUv.yx * 310.0 + 8.1);
+    nTex.xy += vec2(rx - 0.5, ry - 0.5) * uGrainRelief * 0.72;
+  }
   mat3 tbn = mat3(normalize(vTangent), normalize(vBitangent), normalize(vNormal));
   vec3 N = normalize(tbn * nTex);
   vec3 V = normalize(uCamPos - vPos);
@@ -70,9 +90,20 @@ void main() {
   vec3 nightC = texture2D(uNight, vUv).rgb;
   float lum = max(nightC.r, max(nightC.g, nightC.b));
   vec3 lights = nightC * mix(1.6, 4.8, lum) * uNightGain;
+  if (uGrainLights > 0.001) {
+    float glt = grain2(vUv * 780.0);
+    lights *= 1.0 + (glt - 0.42) * uGrainLights * 1.65;
+    float spark = smoothstep(0.74, 1.0, glt) * lum;
+    lights += vec3(1.0, 0.78, 0.42) * spark * uGrainLights * 0.62;
+  }
 
   float specMask = texture2D(uSpec, vUv).r;
   vec3 lit = dayC * (0.12 + 0.88 * max(ndl, 0.0));
+  if (uGrainRelief > 0.001) {
+    float land = 1.0 - specMask;
+    float rg = grain2(vUv * 190.0);
+    lit *= 1.0 + (rg - 0.5) * uGrainRelief * 0.18 * land;
+  }
   vec3 color = mix(lights, lit, dayStrength);
 
   float spec = pow(max(dot(N, H), 0.0), 48.0) * specMask * dayStrength;
@@ -96,6 +127,7 @@ void main() {
   #include <colorspace_fragment>
 }
 `;
+
 
 export const ATMO_VERT = /* glsl */ `
 varying vec3 vNormal;

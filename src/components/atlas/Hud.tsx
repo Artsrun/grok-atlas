@@ -4,6 +4,7 @@ import { focusForCountry } from "@/lib/atlas/fly";
 import { focusOf, HOME, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { springLabel, tideAt, tideMeters } from "@/lib/atlas/tide";
+import { deviceCaps } from "@/lib/atlas/device";
 
 /**
  * `tickOrbits` writes sunLon/moonLon every frame, so anything that subscribes
@@ -181,9 +182,11 @@ function ShellSection() {
   const nightGain = useAtlas((s) => s.nightGain);
   const bump = useAtlas((s) => s.bump);
   const tideGain = useAtlas((s) => s.tideGain);
+  const grainMix = useAtlas((s) => s.grainMix);
   const sun = useSunDeg();
   const moon = useMoonDeg();
   const st = useAtlas.getState;
+  const cap = deviceCaps();
 
   return (
     <section className="border-b border-etch p-3">
@@ -238,6 +241,19 @@ function ShellSection() {
         onChange={(v) => st().setTideGain(v / 100)}
         format={(v) => `×${(v / 100).toFixed(2)}`}
       />
+      <Slider
+        label="Grain · lights / relief"
+        min={0}
+        max={150}
+        value={Math.round(grainMix * 100)}
+        onChange={(v) => st().setGrainMix(v / 100)}
+        format={(v) =>
+          cap.tier === "low" ? "compat 0" : `${cap.tier} ×${(v / 100).toFixed(2)}`
+        }
+      />
+      <p className="mt-2 font-mono text-2xs uppercase tracking-wide text-dimmer">
+        gpu {cap.label} · {cap.webgl2 ? "webgl2" : "webgl1"} · dpr {cap.dpr[1]}
+      </p>
       <div className="mt-3 grid grid-cols-2 gap-1">
         <LayerToggle id="showAtmosphere" label="atmosphere" />
         <LayerToggle id="showClouds" label="clouds" />

@@ -42,6 +42,7 @@ type AtlasState = {
   bump: number;
   cloudOpacity: number;
   tideGain: number;
+  grainMix: number;
   showAtmosphere: boolean;
   showClouds: boolean;
   showBorders: boolean;
@@ -65,6 +66,7 @@ type AtlasState = {
   setBump: (v: number) => void;
   setCloudOpacity: (v: number) => void;
   setTideGain: (v: number) => void;
+  setGrainMix: (v: number) => void;
   toggle: (k: LayerKey) => void;
   flyTo: (f: Focus) => void;
   setHere: (here: { lat: number; lon: number } | null) => void;
@@ -89,6 +91,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   bump: 1.05,
   cloudOpacity: 0.42,
   tideGain: 1,
+  grainMix: 1,
   showAtmosphere: true,
   showClouds: true,
   showBorders: true,
@@ -112,6 +115,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   setBump: (bump) => set({ bump }),
   setCloudOpacity: (cloudOpacity) => set({ cloudOpacity }),
   setTideGain: (tideGain) => set({ tideGain }),
+  setGrainMix: (grainMix) => set({ grainMix }),
   toggle: (k) => set({ [k]: !get()[k] } as Partial<AtlasState>),
   /** State for the HUD, command for the rig. */
   flyTo: (focus) => {
