@@ -26,6 +26,7 @@ import { useAtlas } from "@/lib/atlas/store";
 import { deviceCaps } from "@/lib/atlas/device";
 import { advanceTrack } from "@/lib/atlas/orbit";
 import { createGovernor, publishFrame } from "@/lib/atlas/perf";
+import { markBoot } from "@/lib/atlas/boot";
 import { Earth } from "./Earth";
 import { Borders } from "./Borders";
 import { Cage, HerePin, IssTrack, Luna, Starfield, Station, SunLight } from "./Extras";
@@ -385,8 +386,12 @@ function Scene({
       <ambientLight intensity={0.16} />
       <Starfield />
       <SunLight />
-      <Luna />
-      <Earth atlasTex={atlasTex} />
+      <Suspense fallback={null}>
+        <Luna />
+      </Suspense>
+      <Suspense fallback={null}>
+        <Earth atlasTex={atlasTex} />
+      </Suspense>
       <Borders countries={countries} />
       <HerePin />
       <Station />
@@ -435,6 +440,7 @@ export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
         const canvas = gl.domElement;
         const onLost = (e: Event) => e.preventDefault();
         canvas.addEventListener("webglcontextlost", onLost, false);
+        markBoot("gl");
       }}
     >
       <Suspense fallback={null}>

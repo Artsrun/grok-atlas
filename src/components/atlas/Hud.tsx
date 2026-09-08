@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { centroidOf, type CountryFeat } from "@/lib/atlas/geo";
 import { focusForCountry } from "@/lib/atlas/fly";
 import { focusOf, HOME, RIDE_ID, VIEWS } from "@/lib/atlas/model";
@@ -8,6 +8,7 @@ import { useAtlas } from "@/lib/atlas/store";
 import { springLabel, tideAt, tideMeters } from "@/lib/atlas/tide";
 import { deviceCaps } from "@/lib/atlas/device";
 import { frameStats } from "@/lib/atlas/perf";
+import { ThumbDock } from "./ThumbDock";
 
 /**
  * `tickOrbits` writes sunLon/moonLon every frame, so anything that subscribes
@@ -585,34 +586,14 @@ function ViewsSection({
 function MobileDock() {
   const panelOpen = useAtlas((s) => s.panelOpen);
   return (
-    <div
-      className="pointer-events-auto absolute inset-x-2 z-30 flex flex-col gap-1"
-      style={{ bottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
-    >
-      {!panelOpen && (
-        <div className="chip-row flex gap-1 overflow-x-auto">
-          {VIEWS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className="press min-h-11 shrink-0 border border-etch bg-substrate px-3 font-mono text-2xs uppercase tracking-[0.12em] text-silk"
-              onClick={() => goView(s)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
-      <button
-        type="button"
-        aria-expanded={panelOpen}
-        aria-controls="atlas-panel"
-        className="press min-h-11 w-full border border-ochre bg-substrate font-mono text-2xs uppercase tracking-[0.16em] text-ochre"
-        onClick={() => useAtlas.getState().toggle("panelOpen")}
-      >
-        {panelOpen ? "Close toolbox" : "Toolbox"}
-      </button>
-    </div>
+    <ThumbDock
+      third={{
+        label: panelOpen ? "Close" : "Toolbox",
+        pressed: panelOpen,
+        hint: panelOpen ? "Close the toolbox" : "Open the toolbox",
+        onClick: () => useAtlas.getState().toggle("panelOpen"),
+      }}
+    />
   );
 }
 
@@ -621,6 +602,11 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
   const panelOpen = useAtlas((s) => s.panelOpen);
   const fine = useFinePointer();
   const names = useMemo(() => countries.map((c) => c.name).sort(), [countries]);
+  const swipeY = useRef<number | null>(null);
+
+  const closeTray = () => {
+    if (useAtlas.getState().panelOpen) useAtlas.getState().toggle("panelOpen");
+  };
 
   return (
     <>
@@ -657,7 +643,7 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
         </div>
       </header>
 
-      <Ticker count={countries.length} fine={fine} />
+      {fine ? <Ticker count={countries.length} fine={fine} /> : null}
 
       {fine && (
         <div className="pointer-events-none absolute left-4 top-1/2 z-20 hidden -translate-y-1/2 font-mono text-2xs leading-6 tracking-wide text-dim md:block">
@@ -704,12 +690,30 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
         } ${
           fine
             ? "absolute right-2 top-[88px] bottom-[52px] w-[min(320px,calc(100%-1rem))]"
-            : "absolute inset-x-2 max-h-[min(52dvh,520px)]"
+            : "absolute inset-x-2 max-h-[min(42dvh,420px)]"
         }`}
         style={
-          fine ? undefined : { bottom: "calc(max(0.5rem, env(safe-area-inset-bottom)) + 3.25rem)" }
+          fine ? undefined : { bottom: "calc(max(0.5rem, env(safe-area-inset-bottom)) + 4.25rem)" }
         }
       >
+        {!fine && (
+          <button
+            type="button"
+            aria-label="Close toolbox"
+            className="tray-handle sticky top-0 z-10 flex w-full items-center justify-center bg-substrate py-2"
+            onPointerDown={(e) => {
+              swipeY.current = e.clientY;
+            }}
+            onPointerUp={(e) => {
+              const y0 = swipeY.current;
+              swipeY.current = null;
+              if (y0 != null && e.clientY - y0 > 48) closeTray();
+            }}
+            onClick={closeTray}
+          >
+            <span className="block h-1 w-10 bg-etch" />
+          </button>
+        )}
         {selected && (
           <section className="border-b border-etch p-3">
             <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">

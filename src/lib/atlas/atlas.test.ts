@@ -40,6 +40,7 @@ import {
   groundTrack,
   trackHeading,
 } from "./orbit.ts";
+import { BOOT_STAGES, bootSnap, markBoot, resetBoot } from "./boot.ts";
 
 type Bounds = CountryFeat["bounds"];
 
@@ -515,4 +516,27 @@ test("ground track samples the window it is asked for", () => {
   const pts = groundTrack(ISS_FIX, 900, 3600, 45);
   assert.equal(pts.length, Math.floor((900 + 3600) / 45) + 1);
   assert.ok(pts.every((p) => Math.abs(p.lat) <= ISS_INC + 1e-6 && Math.abs(p.lon) <= 180));
+});
+
+// ── staged boot ────────────────────────────────────────────────────────────
+
+test("boot starts dark and fills in order", () => {
+  resetBoot();
+  assert.equal(bootSnap().progress, 0);
+  assert.equal(bootSnap().lit, false);
+  assert.equal(bootSnap().ready, false);
+  markBoot("gl");
+  markBoot("day");
+  assert.equal(bootSnap().lit, true);
+  assert.equal(bootSnap().ready, false);
+  assert.equal(bootSnap().label, "day map");
+  markBoot("night");
+  assert.equal(bootSnap().ready, true);
+  assert.ok(bootSnap().progress > 0.4);
+  for (const s of BOOT_STAGES) markBoot(s);
+  assert.equal(bootSnap().progress, 1);
+  markBoot("day");
+  assert.equal(bootSnap().progress, 1, "repeat marks do not inflate");
+  resetBoot();
+  assert.equal(bootSnap().progress, 0);
 });
