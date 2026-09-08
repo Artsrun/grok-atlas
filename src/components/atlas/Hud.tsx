@@ -1,11 +1,13 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { centroidOf, type CountryFeat } from "@/lib/atlas/geo";
 import { focusForCountry } from "@/lib/atlas/fly";
-import { focusOf, HOME, VIEWS } from "@/lib/atlas/model";
+import { focusOf, HOME, RIDE_ID, VIEWS } from "@/lib/atlas/model";
+import type { View } from "@/lib/atlas/model";
 import { useFinePointer } from "@/lib/atlas/pointer";
 import { useAtlas } from "@/lib/atlas/store";
 import { springLabel, tideAt, tideMeters } from "@/lib/atlas/tide";
 import { deviceCaps } from "@/lib/atlas/device";
+import { frameStats } from "@/lib/atlas/perf";
 
 /**
  * `tickOrbits` writes sunLon/moonLon every frame, so anything that subscribes
@@ -15,6 +17,14 @@ import { deviceCaps } from "@/lib/atlas/device";
  */
 const useSunDeg = () => useAtlas((s) => Math.round(s.sunLon));
 const useMoonDeg = () => useAtlas((s) => Math.round(s.moonLon) % 360);
+
+/** A view is a camera, except the one that is a seat. */
+const goView = (v: View) => {
+  const st = useAtlas.getState();
+  st.select(null);
+  if (v.id === RIDE_ID) st.rideIss(true);
+  else st.flyTo(focusOf(v));
+};
 
 function Tag({ kind, children }: { kind: "m" | "d" | "c" | "x"; children: string }) {
   const cls =
@@ -34,15 +44,7 @@ function Tag({ kind, children }: { kind: "m" | "d" | "c" | "x"; children: string
   );
 }
 
-function Tip({
-  text,
-  end,
-  children,
-}: {
-  text: string;
-  end?: boolean;
-  children: ReactNode;
-}) {
+function Tip({ text, end, children }: { text: string; end?: boolean; children: ReactNode }) {
   return (
     <span className={`tip block ${end ? "tip-end" : ""}`} data-tip={text}>
       {children}
@@ -67,7 +69,7 @@ const LAYER_TIPS: Record<ToggleId, string> = {
   showAtmosphere: "Limb airglow. Cheap pass.",
   showClouds: "Drifting cloud deck.",
   showBorders: "Natural Earth 110m outlines.",
-  showCage: "Geodesic shell. Visual only.",
+  showCage: "Graticule, shell, degree readings.",
   showIss: "Live ZARYA pin, 5 s poll.",
   showMoon: "Phase disc, declared range.",
   showTides: "P2 lunar + 0.46 solar bulge.",
@@ -219,6 +221,44 @@ function Slider({
   );
 }
 
+/**
+ * Frame rate is a per-frame number and this is a HUD: poll it twice a second
+ * rather than let sixty frames re-render the panel to print one integer.
+ */
+function FrameReadout() {
+  const [s, setS] = useState(frameStats);
+  useEffect(() => {
+    const id = setInterval(() => setS(frameStats()), 500);
+    return () => clearInterval(id);
+  }, []);
+  const held = s.fps >= 55;
+  return (
+    <span className={held ? "text-lichen" : "text-rust"}>
+      {Math.round(s.fps)} fps{s.scale < 1 ? ` · ×${s.scale.toFixed(2)}` : ""}
+    </span>
+  );
+}
+
+/** Not a layer — a seat. It takes the camera, so it gets its own button. */
+function RideToggle() {
+  const on = useAtlas((s) => s.issRide);
+  return (
+    <Tip text="Camera on the station, looking down the track." end>
+      <button
+        type="button"
+        aria-pressed={on}
+        aria-label="ISS ride. Camera on the station, looking down the track."
+        onClick={() => useAtlas.getState().rideIss(!on)}
+        className={`press min-h-11 w-full border px-2 font-mono text-2xs uppercase tracking-[0.12em] transition-colors duration-150 ${
+          on ? "border-ochre bg-substrate-2 text-ochre" : "border-etch text-dimmer hover:text-silk"
+        }`}
+      >
+        {on ? "leave ride" : "iss ride"}
+      </button>
+    </Tip>
+  );
+}
+
 function ShellSection({ compact }: { compact: boolean }) {
   const nightGain = useAtlas((s) => s.nightGain);
   const bump = useAtlas((s) => s.bump);
@@ -289,12 +329,10 @@ function ShellSection({ compact }: { compact: boolean }) {
         max={150}
         value={Math.round(grainMix * 100)}
         onChange={(v) => st().setGrainMix(v / 100)}
-        format={(v) =>
-          cap.tier === "low" ? "compat 0" : `${cap.tier} ×${(v / 100).toFixed(2)}`
-        }
+        format={(v) => (cap.tier === "low" ? "compat 0" : `${cap.tier} ×${(v / 100).toFixed(2)}`)}
       />
       <p className="mt-2 font-mono text-2xs uppercase tracking-wide text-dimmer">
-        gpu {cap.label} · {cap.webgl2 ? "webgl2" : "webgl1"} · dpr {cap.dpr[1]}
+        gpu {cap.label} · {cap.webgl2 ? "webgl2" : "webgl1"} · dpr {cap.dpr[1]} · <FrameReadout />
       </p>
     </>
   );
@@ -324,6 +362,7 @@ function ShellSection({ compact }: { compact: boolean }) {
         <LayerToggle id="showMoon" label="moon" />
         <LayerToggle id="showTides" label="tides" />
         <LayerToggle id="showCage" label="cage" />
+        <RideToggle />
         <LayerToggle id="cupola" label="cupola" />
         <LayerToggle id="autoSun" label="sun drift" />
         <LayerToggle id="autoMoon" label="moon drift" />
@@ -451,7 +490,8 @@ function ViewsSection({
   compact: boolean;
 }) {
   const selected = useAtlas((s) => s.selected);
-  const site = useAtlas((s) => s.focus?.site);
+  const ride = useAtlas((s) => s.issRide);
+  const site = useAtlas((s) => (s.issRide ? RIDE_ID : s.focus?.site));
   const [copied, setCopied] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -476,10 +516,7 @@ function ViewsSection({
               <button
                 type="button"
                 className="press flex min-h-11 w-full items-center justify-between border border-etch px-2 text-left"
-                onClick={() => {
-                  useAtlas.getState().select(null);
-                  useAtlas.getState().flyTo(focusOf(s));
-                }}
+                onClick={() => goView(s)}
               >
                 <span className="font-mono text-xs text-silk">{s.label}</span>
                 <span className="font-mono text-2xs text-dimmer">{s.note}</span>
@@ -495,10 +532,7 @@ function ViewsSection({
               key={s.id}
               type="button"
               className="press min-h-11 shrink-0 border border-etch px-3 font-mono text-2xs uppercase tracking-[0.12em] text-silk"
-              onClick={() => {
-                useAtlas.getState().select(null);
-                useAtlas.getState().flyTo(focusOf(s));
-              }}
+              onClick={() => goView(s)}
             >
               {s.label}
             </button>
@@ -529,7 +563,8 @@ function ViewsSection({
         className="press mt-2 min-h-11 w-full border border-etch font-mono text-2xs uppercase tracking-[0.12em] text-dim hover:text-silk"
         onClick={async () => {
           const p = new URLSearchParams();
-          if (selected) p.set("c", selected);
+          // The ride is the view: a country under it is not what you'd share.
+          if (selected && !ride) p.set("c", selected);
           else if (site) p.set("site", site);
           const url = `${location.origin}${location.pathname}${p.toString() ? `?${p}` : ""}`;
           try {
@@ -561,10 +596,7 @@ function MobileDock() {
               key={s.id}
               type="button"
               className="press min-h-11 shrink-0 border border-etch bg-substrate px-3 font-mono text-2xs uppercase tracking-[0.12em] text-silk"
-              onClick={() => {
-                useAtlas.getState().select(null);
-                useAtlas.getState().flyTo(focusOf(s));
-              }}
+              onClick={() => goView(s)}
             >
               {s.label}
             </button>
@@ -675,9 +707,7 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
             : "absolute inset-x-2 max-h-[min(52dvh,520px)]"
         }`}
         style={
-          fine
-            ? undefined
-            : { bottom: "calc(max(0.5rem, env(safe-area-inset-bottom)) + 3.25rem)" }
+          fine ? undefined : { bottom: "calc(max(0.5rem, env(safe-area-inset-bottom)) + 3.25rem)" }
         }
       >
         {selected && (

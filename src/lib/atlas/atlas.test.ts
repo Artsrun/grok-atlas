@@ -22,6 +22,24 @@ import { subsolarLat, OBLIQUITY } from "./sun.ts";
 import { elongation, springFactor, springLabel, tideAt } from "./tide.ts";
 import { classifyDevice } from "./device.ts";
 import { ORBIT, classifyPointer } from "./pointer.ts";
+import {
+  CAGE_R,
+  cageSegments,
+  formatLat,
+  formatLon,
+  labelSpots,
+  meridians,
+  parallels,
+} from "./graticule.ts";
+import { RUNGS, createGovernor } from "./perf.ts";
+import {
+  ISS_INC,
+  ISS_PERIOD,
+  SIDEREAL_DAY,
+  advanceTrack,
+  groundTrack,
+  trackHeading,
+} from "./orbit.ts";
 
 type Bounds = CountryFeat["bounds"];
 
@@ -368,7 +386,133 @@ test("coarse orbit is heavier and ignores smaller taps than fine", () => {
 
 test("pointer: hover-fine is desktop, coarse is toolbox, width is the fallback", () => {
   assert.equal(classifyPointer({ hoverFine: true, coarse: false, wide: true }), true);
-  assert.equal(classifyPointer({ hoverFine: false, coarse: true, wide: true }), false, "iPad stays toolbox");
-  assert.equal(classifyPointer({ hoverFine: false, coarse: false, wide: true }), true, "headless wide");
+  assert.equal(
+    classifyPointer({ hoverFine: false, coarse: true, wide: true }),
+    false,
+    "iPad stays toolbox",
+  );
+  assert.equal(
+    classifyPointer({ hoverFine: false, coarse: false, wide: true }),
+    true,
+    "headless wide",
+  );
   assert.equal(classifyPointer({ hoverFine: false, coarse: false, wide: false }), false);
+});
+
+// ── cage coordinates ───────────────────────────────────────────────────────
+
+test("degree readings letter the hemisphere, never the meridians", () => {
+  assert.equal(formatLat(0), "0°");
+  assert.equal(formatLat(30), "30°N");
+  assert.equal(formatLat(-60), "60°S");
+  assert.equal(formatLon(0), "0°");
+  assert.equal(formatLon(180), "180°");
+  assert.equal(formatLon(-180), "180°");
+  assert.equal(formatLon(60), "60°E");
+  assert.equal(formatLon(-90), "90°W");
+});
+
+test("cage rails: parallels stop short of the poles, meridians close the circle", () => {
+  const lats = parallels(30);
+  assert.ok(lats.includes(0));
+  assert.ok(lats.every((l) => Math.abs(l) <= 80));
+  assert.equal(meridians(30).length, 12);
+  assert.equal(meridians(30).at(-1), 150);
+});
+
+test("cage segments come in pairs, all on the cage radius", () => {
+  const p = cageSegments(30, CAGE_R, 10);
+  assert.equal(p.length % 6, 0, "endpoints pair up");
+  for (let i = 0; i < p.length; i += 3) {
+    near(Math.hypot(p[i], p[i + 1], p[i + 2]), CAGE_R, 1e-6);
+  }
+});
+
+test("every reading sits on a rail and says what it reads", () => {
+  const spots = labelSpots(30);
+  assert.ok(spots.length > 12);
+  const lons = new Set(meridians(30));
+  for (const s of spots) {
+    if (s.text.endsWith("E") || s.text.endsWith("W") || s.text === "180°" || s.text === "0°") {
+      assert.ok(lons.has(s.lon), `${s.text} off-meridian`);
+    } else {
+      assert.equal(s.text, formatLat(s.lat));
+    }
+  }
+});
+
+// ── frame governor ─────────────────────────────────────────────────────────
+
+const run = (g: ReturnType<typeof createGovernor>, fps: number, seconds: number) => {
+  const dt = 1 / fps;
+  for (let t = 0; t < seconds; t += dt) g.frame(dt);
+  return g.stats();
+};
+
+test("governor holds full scale while the frame holds", () => {
+  const g = createGovernor();
+  const s = run(g, 60, 8);
+  assert.equal(s.scale, 1);
+  assert.equal(s.rung, 0);
+});
+
+test("governor sheds pixels under load, then hands them back", () => {
+  const g = createGovernor();
+  const under = run(g, 34, 10);
+  assert.ok(under.scale < 1, `expected a drop, got ${under.scale}`);
+  const back = run(g, 61, 40);
+  assert.equal(back.scale, 1);
+});
+
+test("governor never falls off the bottom rung", () => {
+  const g = createGovernor();
+  const s = run(g, 8, 60);
+  assert.equal(s.scale, RUNGS[RUNGS.length - 1]);
+});
+
+test("a stalled frame is not a frame rate", () => {
+  const g = createGovernor();
+  run(g, 60, 3);
+  for (let i = 0; i < 5; i++) g.frame(2.5);
+  assert.equal(g.stats().scale, 1);
+});
+
+// ── ISS ground track ───────────────────────────────────────────────────────
+
+const ISS_FIX = { lat: 12.4, lon: -30.2, ascending: true };
+
+test("track stays inside the inclination and returns after one period", () => {
+  for (let t = 0; t < ISS_PERIOD; t += 60) {
+    const p = advanceTrack(ISS_FIX, t);
+    assert.ok(Math.abs(p.lat) <= ISS_INC + 1e-6, `${p.lat} past inclination`);
+  }
+  const round = advanceTrack(ISS_FIX, ISS_PERIOD);
+  near(round.lat, ISS_FIX.lat, 1e-6);
+  // A period later the ground track has slipped west by one period of spin.
+  const drift = ((round.lon - ISS_FIX.lon + 540) % 360) - 180;
+  near(drift, -(360 * ISS_PERIOD) / SIDEREAL_DAY, 1e-6);
+});
+
+test("zero seconds is the fix itself, both branches", () => {
+  for (const ascending of [true, false]) {
+    const p = advanceTrack({ ...ISS_FIX, ascending }, 0);
+    near(p.lat, ISS_FIX.lat, 1e-9);
+    near(p.lon, ISS_FIX.lon, 1e-9);
+    assert.equal(p.ascending, ascending);
+  }
+});
+
+test("the branch decides which way the station is heading", () => {
+  const up = trackHeading(ISS_FIX);
+  const down = trackHeading({ ...ISS_FIX, ascending: false });
+  assert.ok(up < 90, `ascending should read northeast, got ${up}`);
+  assert.ok(down > 90 && down < 180, `descending should read southeast, got ${down}`);
+  assert.ok(advanceTrack(ISS_FIX, 30).lat > ISS_FIX.lat);
+  assert.ok(advanceTrack({ ...ISS_FIX, ascending: false }, 30).lat < ISS_FIX.lat);
+});
+
+test("ground track samples the window it is asked for", () => {
+  const pts = groundTrack(ISS_FIX, 900, 3600, 45);
+  assert.equal(pts.length, Math.floor((900 + 3600) / 45) + 1);
+  assert.ok(pts.every((p) => Math.abs(p.lat) <= ISS_INC + 1e-6 && Math.abs(p.lon) <= 180));
 });

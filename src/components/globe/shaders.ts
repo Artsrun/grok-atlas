@@ -62,11 +62,22 @@ float hash21(vec2 p) {
   return fract(p.x * p.y);
 }
 
+/**
+ * GRAIN_OCTAVES is a compile-time budget, not a branch: the mid tier links a
+ * one-hash grain and never pays for octaves it cannot afford at 60.
+ */
 float grain2(vec2 uv) {
   float a = hash21(uv);
+#if GRAIN_OCTAVES > 2
   float b = hash21(uv * 2.13 + 17.1);
   float c = hash21(uv * 4.71 + 9.2);
   return a * 0.55 + b * 0.30 + c * 0.15;
+#elif GRAIN_OCTAVES > 1
+  float b = hash21(uv * 2.13 + 17.1);
+  return a * 0.66 + b * 0.34;
+#else
+  return a;
+#endif
 }
 
 void main() {
@@ -128,7 +139,6 @@ void main() {
 }
 `;
 
-
 export const ATMO_VERT = /* glsl */ `
 varying vec3 vNormal;
 varying vec3 vPos;
@@ -158,6 +168,9 @@ void main() {
   vec3 col = mix(atmoTwilight, atmoDay, smoothstep(-0.25, 0.75, sun));
   float alpha = pow(clamp((fres - 0.27) / 0.27, 0.0, 1.0), 3.0) * day;
   if (uInner > 0.5) alpha *= 0.45;
+  // From orbit the shell is a limb; from inside it, it is a wall across the
+  // sky with a black gap under it. Ride altitude fades it back to haze.
+  alpha *= mix(0.16, 1.0, smoothstep(1.02, 1.34, length(uCamPos)));
   gl_FragColor = vec4(col, alpha * 0.72);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -217,6 +230,48 @@ void main() {
   float day = smoothstep(-0.08, 0.22, ndl);
   vec3 color = albedo * mix(0.04, 1.12, day);
   gl_FragColor = vec4(color, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
+/**
+ * Cage coordinates. Every degree reading in the scene is one quad in one
+ * buffer, billboarded here rather than by a Sprite each — thirty-odd draw
+ * calls collapse to one, and the labels cost the frame nothing to turn.
+ */
+export const COORD_VERT = /* glsl */ `
+attribute vec2 aCorner;
+uniform vec3 uCamPos;
+uniform float uSize;
+varying vec2 vUv;
+varying float vFace;
+
+void main() {
+  vUv = uv;
+  vec3 anchor = (modelMatrix * vec4(position, 1.0)).xyz;
+  vFace = dot(normalize(anchor), normalize(uCamPos - anchor));
+  vec4 mv = viewMatrix * vec4(anchor, 1.0);
+  // Offset in view space: the quad faces the lens whatever the globe does.
+  mv.xy += aCorner * uSize;
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+export const COORD_FRAG = /* glsl */ `
+uniform sampler2D uAtlas;
+uniform vec3 uTint;
+uniform float uOpacity;
+varying vec2 vUv;
+varying float vFace;
+
+void main() {
+  float a = texture2D(uAtlas, vUv).a;
+  // Readings on the limb fade out before they can smear along it.
+  float face = smoothstep(0.08, 0.42, vFace);
+  float alpha = a * face * uOpacity;
+  if (alpha < 0.01) discard;
+  gl_FragColor = vec4(uTint, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }

@@ -6,6 +6,7 @@ import { useAtlas } from "@/lib/atlas/store";
 import { ll2xyz } from "@/lib/atlas/geo";
 import { moonXYZ } from "@/lib/atlas/tide";
 import { deviceCaps } from "@/lib/atlas/device";
+import { frameScale } from "@/lib/atlas/perf";
 import { ATMO_FRAG, ATMO_VERT, CLOUD_FRAG, CLOUD_VERT, EARTH_FRAG, EARTH_VERT } from "./shaders";
 
 export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
@@ -92,6 +93,12 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
   const sunVec = useMemo(() => new THREE.Vector3(), []);
   const moonVec = useMemo(() => new THREE.Vector3(), []);
 
+  /** Octaves are linked, not branched — the tier picks the shader it can run. */
+  const defines = useMemo(
+    () => ({ GRAIN_OCTAVES: cap.tier === "high" ? 3 : cap.tier === "mid" ? 2 : 1 }),
+    [cap.tier],
+  );
+
   useFrame(({ camera, clock }) => {
     const s = useAtlas.getState();
     const xyz = ll2xyz(s.sunLat, s.sunLon, 1);
@@ -109,7 +116,8 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       earthMat.current.uniforms.uBump.value = s.bump;
       earthMat.current.uniforms.uTideAmp.value = s.showTides ? s.tideGain : 0;
       earthMat.current.uniforms.uMoon.value.copy(moonVec);
-      const mix = s.grainMix;
+      // Grain is the first thing the governor takes and the first it gives back.
+      const mix = s.grainMix * frameScale();
       earthMat.current.uniforms.uGrainLights.value = cap.grainLights * mix;
       earthMat.current.uniforms.uGrainRelief.value = cap.grainRelief * mix;
     }
@@ -133,6 +141,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
           vertexShader={EARTH_VERT}
           fragmentShader={EARTH_FRAG}
           uniforms={uniforms}
+          defines={defines}
         />
       </mesh>
       {showClouds && (
