@@ -5,9 +5,11 @@ import * as THREE from "three";
 import { useAtlas } from "@/lib/atlas/store";
 import { ll2xyz } from "@/lib/atlas/geo";
 import { moonXYZ } from "@/lib/atlas/tide";
+import { deviceCaps } from "@/lib/atlas/device";
 import { ATMO_FRAG, ATMO_VERT, CLOUD_FRAG, CLOUD_VERT, EARTH_FRAG, EARTH_VERT } from "./shaders";
 
 export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
+  const cap = deviceCaps();
   const [dayMap, nightMap, specMap, normalMap, cloudMap] = useTexture([
     "/earth/day.jpg",
     "/earth/night.png",
@@ -20,17 +22,19 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
     dayMap.colorSpace = THREE.SRGBColorSpace;
     nightMap.colorSpace = THREE.SRGBColorSpace;
     atlasTex.colorSpace = THREE.SRGBColorSpace;
-    dayMap.anisotropy = 8;
-    nightMap.anisotropy = 8;
+    dayMap.anisotropy = cap.anisotropy;
+    nightMap.anisotropy = cap.anisotropy;
+    specMap.anisotropy = Math.min(4, cap.anisotropy);
+    normalMap.anisotropy = cap.anisotropy;
     cloudMap.wrapS = THREE.RepeatWrapping;
     dayMap.needsUpdate = true;
-  }, [dayMap, nightMap, cloudMap, atlasTex]);
+  }, [dayMap, nightMap, specMap, normalMap, cloudMap, atlasTex, cap.anisotropy]);
 
   const geo = useMemo(() => {
-    const g = new THREE.SphereGeometry(1, 96, 64);
+    const g = new THREE.SphereGeometry(1, cap.sphereSeg[0], cap.sphereSeg[1]);
     g.computeTangents();
     return g;
-  }, []);
+  }, [cap.sphereSeg]);
 
   useEffect(() => () => geo.dispose(), [geo]);
 
@@ -53,6 +57,8 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       uNightGain: { value: 1.65 },
       uBump: { value: 1.05 },
       uTideAmp: { value: 0 },
+      uGrainLights: { value: cap.grainLights },
+      uGrainRelief: { value: cap.grainRelief },
     }),
     [dayMap, nightMap, specMap, normalMap, atlasTex],
   );
@@ -103,6 +109,9 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       earthMat.current.uniforms.uBump.value = s.bump;
       earthMat.current.uniforms.uTideAmp.value = s.showTides ? s.tideGain : 0;
       earthMat.current.uniforms.uMoon.value.copy(moonVec);
+      const mix = s.grainMix;
+      earthMat.current.uniforms.uGrainLights.value = cap.grainLights * mix;
+      earthMat.current.uniforms.uGrainRelief.value = cap.grainRelief * mix;
     }
     if (atmoMat.current) apply(atmoMat.current.uniforms as never);
     if (atmoIn.current) apply(atmoIn.current.uniforms as never);

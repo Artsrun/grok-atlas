@@ -22,6 +22,7 @@ import {
 } from "@/lib/atlas/fly";
 import { HOME } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
+import { deviceCaps } from "@/lib/atlas/device";
 import { Earth } from "./Earth";
 import { Borders } from "./Borders";
 import { Cage, HerePin, Luna, Starfield, Station, SunLight } from "./Extras";
@@ -312,6 +313,7 @@ function Scene({
 }
 
 export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
+  const cap = deviceCaps();
   const atlasTex = useMemo(() => {
     const cv = document.createElement("canvas");
     cv.width = OVERLAY_W;
@@ -329,16 +331,21 @@ export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
     <Canvas
       className="h-full w-full touch-none"
       camera={{ fov: FOV, near: 0.08, far: 220, position: bootPos() }}
-      dpr={[1, 1.75]}
+      dpr={cap.dpr}
       gl={{
-        antialias: true,
+        antialias: cap.antialias,
         alpha: false,
-        powerPreference: "high-performance",
+        powerPreference: cap.powerPreference,
+        stencil: false,
+        depth: true,
       }}
       onCreated={({ gl }) => {
         gl.setClearColor("#05070c");
         gl.toneMapping = THREE.ACESFilmicToneMapping;
         gl.toneMappingExposure = 1.05;
+        const canvas = gl.domElement;
+        const onLost = (e: Event) => e.preventDefault();
+        canvas.addEventListener("webglcontextlost", onLost, false);
       }}
     >
       <Suspense fallback={null}>

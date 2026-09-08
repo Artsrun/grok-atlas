@@ -10,7 +10,7 @@ Home camera is the Nile Delta / Eastern Mediterranean — the cupola night-limb 
 - **Country** — tap to inspect and fly to centroid
 - **Views** — Nile Delta, Yerevan, Ararat, Europe, Americas, West Pacific, Lunar stand
 - **Layers** — atmosphere, clouds, borders, cage, ISS, moon, tides, cupola vignette, auto-sun, auto-moon, auto-rotate
-- **Device tilt** — optional gyroscope on the rig (phone)
+- **Grain** — city lights and relief pick up a heavy ISS-style grain on new GPUs (Apple M / A15+, Adreno 6xx+, RTX). Older / software GL stays smooth. Force a path with `?tier=high|mid|low`.
 - **Share** — copies `?c=Armenia` or `?site=nile`
 
 ## Stack

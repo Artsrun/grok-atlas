@@ -20,6 +20,7 @@ import { formatHash, parseHash } from "./hash.ts";
 import { cameraListeners, emitCamera, onCamera, onFlyRequest, requestFly } from "./camera.ts";
 import { subsolarLat, OBLIQUITY } from "./sun.ts";
 import { elongation, springFactor, springLabel, tideAt } from "./tide.ts";
+import { classifyDevice } from "./device.ts";
 
 type Bounds = CountryFeat["bounds"];
 
@@ -288,4 +289,71 @@ test("flights reach every live subscriber and stop at unsubscribe", () => {
   const off2 = onFlyRequest((f) => got.push(`b${f.label}`));
   assert.deepEqual(got, ["ax", "by"], "y was buffered while nobody listened");
   off2();
+});
+
+const probe = (over: Partial<Parameters<typeof classifyDevice>[0]>) =>
+  classifyDevice({
+    renderer: "Mali-G52",
+    webgl2: true,
+    maxTextureSize: 8192,
+    cores: 6,
+    memoryGb: 4,
+    dpr: 2,
+    mobile: true,
+    saveData: false,
+    ...over,
+  });
+
+test("SwiftShader and save-data stay on the compat path with no grain", () => {
+  const soft = probe({ renderer: "Google SwiftShader", webgl2: true, cores: 8, memoryGb: 8 });
+  assert.equal(soft.tier, "low");
+  assert.equal(soft.grainLights, 0);
+  assert.equal(soft.grainRelief, 0);
+  assert.equal(soft.antialias, false);
+
+  const data = probe({ saveData: true, renderer: "Apple M3" });
+  assert.equal(data.tier, "low");
+  assert.equal(data.grainLights, 0);
+});
+
+test("WebGL1 never gets heavy grain", () => {
+  const cap = probe({ webgl2: false, renderer: "Apple GPU", cores: 8, dpr: 3 });
+  assert.equal(cap.tier, "low");
+  assert.equal(cap.grainLights, 0);
+});
+
+test("new Apple / Adreno / NVIDIA silicon get heavy light and relief grain", () => {
+  const m4 = probe({
+    renderer: "ANGLE (Apple, Apple M4, OpenGL 4.1)",
+    mobile: false,
+    cores: 10,
+    memoryGb: 16,
+    dpr: 2,
+    maxTextureSize: 16384,
+  });
+  assert.equal(m4.tier, "high");
+  assert.ok(m4.grainLights > 1, `lights ${m4.grainLights}`);
+  assert.ok(m4.grainRelief > 1, `relief ${m4.grainRelief}`);
+  assert.equal(m4.antialias, true);
+  assert.ok(m4.dpr[1] >= 2);
+
+  const adreno = probe({ renderer: "Adreno (TM) 740", cores: 8, memoryGb: 8, dpr: 3 });
+  assert.equal(adreno.tier, "high");
+  assert.ok(adreno.grainLights > 1);
+
+  const rtx = probe({
+    renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11)",
+    mobile: false,
+    cores: 16,
+    memoryGb: 32,
+    dpr: 1.5,
+  });
+  assert.equal(rtx.tier, "high");
+});
+
+test("mid-tier mobile keeps a light grain and a cheaper sphere", () => {
+  const cap = probe({ renderer: "Mali-G52", cores: 6, memoryGb: 4, dpr: 2, mobile: true });
+  assert.equal(cap.tier, "mid");
+  assert.ok(cap.grainLights > 0 && cap.grainLights < 0.6);
+  assert.ok(cap.sphereSeg[0] < 96);
 });
