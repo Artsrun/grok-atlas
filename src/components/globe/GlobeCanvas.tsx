@@ -1,17 +1,25 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { CountryFeat } from "@/lib/atlas/geo";
+import { ll2xyz, OVERLAY_H, OVERLAY_W, paintAtlas, pickCountry, xyz2ll } from "@/lib/atlas/geo";
+import type { CameraAt } from "@/lib/atlas/camera";
+import { cameraListeners, emitCamera, onFlyRequest } from "@/lib/atlas/camera";
+import { hashAt } from "@/lib/atlas/hash";
+import type { Focus } from "@/lib/atlas/store";
+import type { FlyPath } from "@/lib/atlas/fly";
 import {
-  centroidOf,
-  ll2xyz,
-  OVERLAY_H,
-  OVERLAY_W,
-  paintAtlas,
-  pickCountry,
-  xyz2ll,
-} from "@/lib/atlas/geo";
+  distAt,
+  flyDuration,
+  flyPath,
+  focusForCountry,
+  FOV,
+  MAX_DIST,
+  MIN_DIST,
+  spanAt,
+  watchReducedMotion,
+} from "@/lib/atlas/fly";
 import { HOME } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { Earth } from "./Earth";
@@ -19,10 +27,23 @@ import { Borders } from "./Borders";
 import { Cage, HerePin, Luna, Starfield, Station, SunLight } from "./Extras";
 
 const HOME_POS = ll2xyz(HOME.lat, HOME.lon, HOME.dist);
-const FLY_SEC = 1.45;
 const ARRIVED_ANGLE = 0.014;
 const ARRIVED_RADIUS = 0.04;
 const TAP_SLOP = 6;
+/**
+ * Parked below this speed, in earth radii per second — a rate, not a per-frame
+ * step, so a 120 Hz phone and a 30 fps laptop agree on when the rig stopped.
+ * ~1° of arc per second at orbit distance: drift you cannot see.
+ */
+const MOVE_RATE = 0.02;
+/** Seconds under that rate before moveend. Outlasts the tail of orbit damping. */
+const SETTLE = 0.18;
+
+/** Mapbox's `hash` sets the opening view outright — no flight from home. */
+const bootPos = () => {
+  const at = hashAt();
+  return at ? ll2xyz(at.lat, at.lon, at.dist) : HOME_POS;
+};
 
 function OverlayTexture({
   countries,
@@ -42,19 +63,11 @@ function OverlayTexture({
   return null;
 }
 
-function slerpDir(
-  a: THREE.Vector3,
-  b: THREE.Vector3,
-  t: number,
-  out: THREE.Vector3,
-  ra: number,
-  rb: number,
-) {
-  const dot = THREE.MathUtils.clamp(a.dot(b), -1, 1);
-  const omega = Math.acos(dot);
-  const r = THREE.MathUtils.lerp(ra, rb, t);
+/** Unit direction along the great circle from a to b. */
+function slerpDir(a: THREE.Vector3, b: THREE.Vector3, t: number, out: THREE.Vector3) {
+  const omega = Math.acos(THREE.MathUtils.clamp(a.dot(b), -1, 1));
   if (omega < 1e-4) {
-    out.copy(a).lerp(b, t).setLength(r);
+    out.copy(a).lerp(b, t).normalize();
     return;
   }
   const so = Math.sin(omega);
@@ -62,7 +75,7 @@ function slerpDir(
     .copy(a)
     .multiplyScalar(Math.sin((1 - t) * omega) / so)
     .addScaledVector(b, Math.sin(t * omega) / so)
-    .setLength(r);
+    .normalize();
 }
 
 function Rig() {
@@ -75,49 +88,94 @@ function Rig() {
   const { camera } = useThree();
   const autoRotate = useAtlas((s) => s.autoRotate);
   const tiltOn = useAtlas((s) => s.tiltOn);
-  const focus = useAtlas((s) => s.focus);
-  const flySeq = useAtlas((s) => s.flySeq);
 
   const fromDir = useRef(new THREE.Vector3());
   const toDir = useRef(new THREE.Vector3());
   const tmp = useRef(new THREE.Vector3());
-  const fromR = useRef(HOME.dist);
-  const toR = useRef(HOME.dist);
-  const flyT = useRef(1);
+  const path = useRef<FlyPath | null>(null);
+  const arc = useRef(0);
+  const dur = useRef(0);
+  const elapsed = useRef(0);
+  const reduced = useRef(false);
 
-  useEffect(() => {
-    if (!focus) return;
-    toDir.current.set(...ll2xyz(focus.lat, focus.lon, 1)).normalize();
-    const here = camera.position;
-    const r = here.length();
-    const wantR = focus.dist ?? r;
-    fromDir.current.copy(here).normalize();
-    const angle = fromDir.current.angleTo(toDir.current);
-    if (angle < ARRIVED_ANGLE && Math.abs(r - wantR) < ARRIVED_RADIUS) {
-      flyT.current = 1;
-      return;
-    }
-    fromR.current = r;
-    toR.current = wantR;
-    flyT.current = 0;
-  }, [flySeq, focus, camera]);
+  const seen = useRef(new THREE.Vector3(NaN, NaN, NaN));
+  const moving = useRef(false);
+  const still = useRef(0);
+
+  useEffect(() => watchReducedMotion((on) => (reduced.current = on)), []);
+
+  const startFlight = useCallback(
+    (focus: Focus) => {
+      toDir.current.set(...ll2xyz(focus.lat, focus.lon, 1)).normalize();
+      const here = camera.position;
+      const r0 = here.length();
+      const r1 = THREE.MathUtils.clamp(focus.dist ?? r0, MIN_DIST, MAX_DIST);
+      fromDir.current.copy(here).normalize();
+      const angle = fromDir.current.angleTo(toDir.current);
+      if (angle < ARRIVED_ANGLE && Math.abs(r0 - r1) < ARRIVED_RADIUS) {
+        path.current = null;
+        return;
+      }
+      // Mapbox `respectPrefersReducedMotion`: arrive, don't fly.
+      if (reduced.current) {
+        camera.position.copy(toDir.current).setLength(r1);
+        path.current = null;
+        return;
+      }
+      const p = flyPath(spanAt(r0, FOV), spanAt(r1, FOV), angle);
+      path.current = p;
+      arc.current = angle;
+      dur.current = flyDuration(p.S);
+      elapsed.current = 0;
+    },
+    [camera],
+  );
+
+  useEffect(() => onFlyRequest(startFlight), [startFlight]);
+
+  const atOf = (p: THREE.Vector3): CameraAt => ({ ...xyz2ll(p.x, p.y, p.z), dist: p.length() });
 
   useFrame((_, dt) => {
     const d = Math.min(dt, 0.05);
     useAtlas.getState().tickOrbits();
     const st = useAtlas.getState();
     const c = controls.current;
-    const flying = flyT.current < 1;
-    if (flying) {
-      flyT.current = Math.min(1, flyT.current + d / FLY_SEC);
-      const ease = 1 - Math.pow(1 - flyT.current, 3);
-      slerpDir(fromDir.current, toDir.current, ease, tmp.current, fromR.current, toR.current);
-      camera.position.copy(tmp.current);
+    const p = path.current;
+    if (p) {
+      elapsed.current = Math.min(dur.current, elapsed.current + d);
+      const t = dur.current > 0 ? elapsed.current / dur.current : 1;
+      const { u, w } = p.at(t * p.S);
+      const k = arc.current > 1e-6 ? THREE.MathUtils.clamp(u / arc.current, 0, 1) : 1;
+      slerpDir(fromDir.current, toDir.current, k, tmp.current);
+      camera.position.copy(tmp.current).setLength(distAt(w, FOV));
       if (c) c.target.set(0, 0, 0);
+      if (t >= 1) path.current = null;
     }
     if (c) {
-      c.autoRotate = st.autoRotate && !st.tiltOn && !flying;
+      c.autoRotate = st.autoRotate && !st.tiltOn && !p && !reduced.current;
       c.enabled = !st.tiltOn;
+    }
+
+    // Move lifecycle. Nothing settles while autoRotate runs, so it never writes a URL.
+    const pos = camera.position;
+    if (Number.isNaN(seen.current.x)) {
+      // Appearing is not moving: seed the baseline so a camera nobody touches
+      // stays silent, and never writes a URL for a view the user never chose.
+      seen.current.copy(pos);
+    } else if (pos.distanceTo(seen.current) > MOVE_RATE * d) {
+      seen.current.copy(pos);
+      still.current = 0;
+      if (!moving.current) {
+        moving.current = true;
+        if (cameraListeners("movestart")) emitCamera("movestart", atOf(pos));
+      }
+      if (cameraListeners("move")) emitCamera("move", atOf(pos));
+    } else if (moving.current) {
+      still.current += d;
+      if (still.current >= SETTLE) {
+        moving.current = false;
+        if (cameraListeners("moveend")) emitCamera("moveend", atOf(pos));
+      }
     }
   });
 
@@ -127,14 +185,14 @@ function Rig() {
       enablePan={false}
       enableDamping
       dampingFactor={0.065}
-      minDistance={1.42}
-      maxDistance={14}
+      minDistance={MIN_DIST}
+      maxDistance={MAX_DIST}
       autoRotate={autoRotate && !tiltOn}
       autoRotateSpeed={0.07}
       rotateSpeed={0.48}
       zoomSpeed={0.7}
       onStart={() => {
-        flyT.current = 1;
+        path.current = null;
       }}
     />
   );
@@ -176,7 +234,7 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
       }
       st.select(name);
       const c = countries.find((x) => x.name === name);
-      if (c) st.flyTo({ ...centroidOf(c), label: name });
+      if (c) st.flyTo(focusForCountry(c));
     };
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointerup", up);
@@ -270,7 +328,7 @@ export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
   return (
     <Canvas
       className="h-full w-full touch-none"
-      camera={{ fov: 42, near: 0.08, far: 220, position: HOME_POS }}
+      camera={{ fov: FOV, near: 0.08, far: 220, position: bootPos() }}
       dpr={[1, 1.75]}
       gl={{
         antialias: true,

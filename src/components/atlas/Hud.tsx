@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { centroidOf, type CountryFeat } from "@/lib/atlas/geo";
+import { focusForCountry } from "@/lib/atlas/fly";
 import { focusOf, HOME, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { springLabel, tideAt, tideMeters } from "@/lib/atlas/tide";
@@ -356,7 +357,7 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
     const c = countries.find((x) => x.name === n);
     if (!c) return;
     useAtlas.getState().select(n);
-    useAtlas.getState().flyTo({ ...centroidOf(c), label: n });
+    useAtlas.getState().flyTo(focusForCountry(c));
   };
 
   return (
