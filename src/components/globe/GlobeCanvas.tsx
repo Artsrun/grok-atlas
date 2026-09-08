@@ -24,9 +24,11 @@ import { HOME } from "@/lib/atlas/model";
 import { ORBIT, isFinePointer } from "@/lib/atlas/pointer";
 import { useAtlas } from "@/lib/atlas/store";
 import { deviceCaps } from "@/lib/atlas/device";
+import { advanceTrack } from "@/lib/atlas/orbit";
+import { createGovernor, publishFrame } from "@/lib/atlas/perf";
 import { Earth } from "./Earth";
 import { Borders } from "./Borders";
-import { Cage, HerePin, Luna, Starfield, Station, SunLight } from "./Extras";
+import { Cage, HerePin, IssTrack, Luna, Starfield, Station, SunLight } from "./Extras";
 
 const HOME_POS = ll2xyz(HOME.lat, HOME.lon, HOME.dist);
 const ARRIVED_ANGLE = 0.014;
@@ -39,6 +41,20 @@ const ARRIVED_RADIUS = 0.04;
 const MOVE_RATE = 0.02;
 /** Seconds under that rate before moveend. Outlasts the tail of orbit damping. */
 const SETTLE = 0.18;
+
+/** Near plane for orbit, and the one the ride needs to not clip the deck. */
+const NEAR_ORBIT = 0.08;
+const NEAR_RIDE = 0.0015;
+/** Seconds down the track the cupola looks — far enough to hold the limb. */
+const CUPOLA_LEAD = 520;
+/** How hard the camera is pulled onto the seat, per second. */
+const RIDE_EASE = 2.6;
+/**
+ * Seat height over the station's own radius. The pin is a stylised box the
+ * size of a country, so the ride sits in the glass and hides it rather than
+ * chasing it: no camera can frame that model and still read as an orbit.
+ */
+const CUPOLA_LIFT = 0.004;
 
 /** Mapbox's `hash` sets the opening view outright — no flight from home. */
 const bootPos = () => {
@@ -104,6 +120,12 @@ function Rig() {
   const moving = useRef(false);
   const still = useRef(0);
 
+  const ridePos = useRef(new THREE.Vector3());
+  const rideLook = useRef(new THREE.Vector3());
+  const rideQuat = useRef(new THREE.Quaternion());
+  const rideMat = useRef(new THREE.Matrix4());
+  const riding = useRef(false);
+
   useEffect(() => watchReducedMotion((on) => (reduced.current = on)), []);
 
   const startFlight = useCallback(
@@ -142,6 +164,39 @@ function Rig() {
     useAtlas.getState().tickOrbits();
     const st = useAtlas.getState();
     const c = controls.current;
+
+    // The ride owns the camera outright: no flight, no orbit, no damping tail.
+    if (st.issRide && st.iss) {
+      path.current = null;
+      const alt = 1 + Math.max(0.04, st.iss.alt / 6371);
+      const fix = { lat: st.iss.lat, lon: st.iss.lon, ascending: st.issAsc };
+      ridePos.current.set(...ll2xyz(fix.lat, fix.lon, alt + CUPOLA_LIFT));
+      const ahead = advanceTrack(fix, CUPOLA_LEAD);
+      rideLook.current.set(...ll2xyz(ahead.lat, ahead.lon, 1));
+      rideMat.current.lookAt(ridePos.current, rideLook.current, ridePos.current);
+      rideQuat.current.setFromRotationMatrix(rideMat.current);
+      // Arriving is the ride starting, not a flight: take the seat outright,
+      // then ease, so a slow device does not spend the pass sliding into place.
+      const k = riding.current ? 1 - Math.exp(-RIDE_EASE * d) : 1;
+      riding.current = true;
+      if (camera.near !== NEAR_RIDE) {
+        camera.near = NEAR_RIDE;
+        camera.updateProjectionMatrix();
+      }
+      camera.position.lerp(ridePos.current, k);
+      camera.quaternion.slerp(rideQuat.current, k);
+      if (c) {
+        c.enabled = false;
+        c.autoRotate = false;
+      }
+      return;
+    }
+    if (riding.current) {
+      riding.current = false;
+      camera.near = NEAR_ORBIT;
+      camera.updateProjectionMatrix();
+    }
+
     const p = path.current;
     if (p) {
       elapsed.current = Math.min(dur.current, elapsed.current + d);
@@ -198,6 +253,36 @@ function Rig() {
       }}
     />
   );
+}
+
+/**
+ * Render scale, governed. The shaders are written for 60 and the grain is the
+ * expensive half — so when a device cannot hold the frame, spend pixels first
+ * and hand them back the moment there is headroom again.
+ */
+function Governor() {
+  const { gl } = useThree();
+  const cap = deviceCaps();
+  const gov = useMemo(() => createGovernor(), []);
+  const scale = useRef(1);
+
+  useEffect(() => {
+    gov.reset();
+    return () => publishFrame({ fps: 60, scale: 1, rung: 0 });
+  }, [gov]);
+
+  useFrame((_, dt) => {
+    const next = gov.frame(dt);
+    publishFrame(gov.stats());
+    if (next === scale.current) return;
+    scale.current = next;
+    const base = Math.min(
+      cap.dpr[1],
+      typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+    );
+    gl.setPixelRatio(Math.max(cap.dpr[0] * 0.5, base * next));
+  });
+  return null;
 }
 
 function Picker({ countries }: { countries: CountryFeat[] }) {
@@ -305,9 +390,11 @@ function Scene({
       <Borders countries={countries} />
       <HerePin />
       <Station />
+      <IssTrack />
       <Cage />
       <OverlayTexture countries={countries} texture={atlasTex} />
       <Rig />
+      <Governor />
       <Picker countries={countries} />
       <TiltBridge />
     </>
@@ -332,7 +419,7 @@ export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
   return (
     <Canvas
       className="h-full w-full touch-none"
-      camera={{ fov: FOV, near: 0.08, far: 220, position: bootPos() }}
+      camera={{ fov: FOV, near: NEAR_ORBIT, far: 220, position: bootPos() }}
       dpr={cap.dpr}
       gl={{
         antialias: cap.antialias,

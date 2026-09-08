@@ -16,7 +16,12 @@ export const VIEWS: View[] = [
   { id: "americas", label: "Americas", lat: 18, lon: -78, dist: 3.1, note: "Caribbean" },
   { id: "pacific", label: "West Pacific", lat: 12, lon: 148, dist: 3.2, note: "terminator" },
   { id: "moon", label: "Moon stand", lat: 8, lon: 90, dist: 7.2, note: "phase" },
+  /** Not a place — `rideIss` reads the id and parks the camera on the station. */
+  { id: "iss", label: "ISS ride", lat: 0, lon: 0, dist: 2.6, note: "cupola" },
 ];
+
+/** The one view whose coordinates come from the feed, not the table. */
+export const RIDE_ID = "iss";
 
 /** Neutral start before geolocation resolves. */
 export const HOME: View = {

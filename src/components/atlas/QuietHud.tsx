@@ -24,7 +24,8 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
   const focus = useAtlas((s) => s.focus);
   const here = useAtlas((s) => s.here);
   const iss = useAtlas((s) => s.iss);
-  const caption = selected ?? focus?.label ?? "";
+  const ride = useAtlas((s) => s.issRide);
+  const caption = ride ? "ISS" : (selected ?? focus?.label ?? "");
   const [hint, setHint] = useState(true);
   const [busy, setBusy] = useState(false);
   const fine = useFinePointer();
@@ -37,8 +38,14 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
     if (caption) setHint(false);
   }, [caption]);
 
-  const solar =
-    focus && Number.isFinite(focus.lon) ? formatSolar(solarHours(focus.lon)) : null;
+  const solar = focus && Number.isFinite(focus.lon) ? formatSolar(solarHours(focus.lon)) : null;
+  // On the ride the sub-line reads the station, not the sun over a country.
+  const sub =
+    ride && iss
+      ? `${iss.lat.toFixed(1)}° ${iss.lon.toFixed(1)}° · ${Math.round(iss.alt)} km · ${iss.vel.toFixed(2)} km/s`
+      : solar
+        ? `solar ${solar}`
+        : null;
 
   return (
     <>
@@ -75,18 +82,13 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
         {iss ? (
           <button
             type="button"
-            className="tip press pointer-events-auto min-h-11 px-1 font-mono text-2xs uppercase tracking-[0.16em] text-dimmer"
-            data-tip="Fly to the station"
-            onClick={() =>
-              useAtlas.getState().flyTo({
-                lat: iss.lat,
-                lon: iss.lon,
-                label: "ISS",
-                dist: 2.05,
-              })
-            }
+            className={`tip press pointer-events-auto min-h-11 px-1 font-mono text-2xs uppercase tracking-[0.16em] ${
+              ride ? "text-ochre" : "text-dimmer"
+            }`}
+            data-tip={ride ? "Leave the station" : "Ride the station"}
+            onClick={() => useAtlas.getState().rideIss(!ride)}
           >
-            ISS
+            {ride ? "LEAVE" : "ISS"}
           </button>
         ) : null}
         <Clock />
@@ -97,9 +99,9 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
           style={{ bottom: "max(2.5rem, calc(env(safe-area-inset-bottom) + 1.5rem))" }}
         >
           <div className="font-display text-lg tracking-wide text-silk">{caption}</div>
-          {solar ? (
+          {sub ? (
             <div className="mt-1 font-mono text-2xs uppercase tracking-[0.16em] text-dimmer">
-              solar {solar}
+              {sub}
             </div>
           ) : null}
         </div>
@@ -108,7 +110,9 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
           className="pointer-events-none absolute inset-x-0 z-20 text-center font-mono text-2xs uppercase tracking-[0.18em] text-dimmer"
           style={{ bottom: "max(2.5rem, calc(env(safe-area-inset-bottom) + 1.5rem))" }}
         >
-          {fine ? "drag · click a country · GROK.ATLAS for toolbox" : "pinch · tap a country · toolbox in the name"}
+          {fine
+            ? "drag · click a country · GROK.ATLAS for toolbox"
+            : "pinch · tap a country · toolbox in the name"}
         </div>
       ) : null}
     </>

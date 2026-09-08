@@ -4,7 +4,7 @@ import { loadCountries } from "@/lib/atlas/geo";
 import { focusForCountry } from "@/lib/atlas/fly";
 import { hashAt, installHashSync } from "@/lib/atlas/hash";
 import { pinHere, pollIss } from "@/lib/atlas/locate";
-import { focusOf, VIEWS } from "@/lib/atlas/model";
+import { focusOf, RIDE_ID, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { GlobeCanvas } from "@/components/globe/GlobeCanvas";
 import { BootScreen } from "./BootScreen";
@@ -38,6 +38,8 @@ export function AtlasApp() {
         // auto-locate, and the canvas already opened on it — so don't fly away.
         if (site === "here") {
           pinHere(true).catch(() => {});
+        } else if (site === RIDE_ID) {
+          useAtlas.getState().rideIss(true);
         } else if (site) {
           const v = VIEWS.find((x) => x.id === site);
           if (v) useAtlas.getState().flyTo(focusOf(v));

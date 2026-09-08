@@ -3,9 +3,12 @@ import { useTexture } from "@react-three/drei";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ll2xyz } from "@/lib/atlas/geo";
+import { LABEL_R, cageSegments, labelSpots } from "@/lib/atlas/graticule";
+import { groundTrack, trackHeading } from "@/lib/atlas/orbit";
 import { MOON_DIST, MOON_RADIUS, moonXYZ } from "@/lib/atlas/tide";
 import { useAtlas } from "@/lib/atlas/store";
-import { MOON_FRAG, MOON_VERT } from "./shaders";
+import { COORD_FRAG, COORD_VERT, MOON_FRAG, MOON_VERT } from "./shaders";
+import { coordGeometry, labelAtlas } from "./labels";
 
 export function Starfield({ count = 2200 }: { count?: number }) {
   const geo = useMemo(() => {
@@ -30,18 +33,71 @@ export function Starfield({ count = 2200 }: { count?: number }) {
   );
 }
 
+/** Geodesic shell, lat/lon graticule, and the degree readings on it. */
 export function Cage() {
   const show = useAtlas((s) => s.showCage);
-  const geo = useMemo(() => new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.32, 1)), []);
-  useEffect(() => () => geo.dispose(), [geo]);
+  const spots = useMemo(() => labelSpots(), []);
+
+  const shell = useMemo(() => new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.32, 1)), []);
+  const grid = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(cageSegments(), 3));
+    return g;
+  }, []);
+  const quads = useMemo(() => coordGeometry(spots, LABEL_R), [spots]);
+  const atlas = useMemo(() => labelAtlas(spots.map((s) => s.text)), [spots]);
+
+  const uniforms = useMemo(
+    () => ({
+      uAtlas: { value: atlas },
+      uTint: { value: new THREE.Color("#d8a866") },
+      uOpacity: { value: 0.92 },
+      uCamPos: { value: new THREE.Vector3() },
+      // View-space half-height of a reading, in earth radii.
+      uSize: { value: 0.058 },
+    }),
+    [atlas],
+  );
+  const mat = useRef<THREE.ShaderMaterial>(null);
+
+  useEffect(
+    () => () => {
+      shell.dispose();
+      grid.dispose();
+      quads.dispose();
+      atlas.dispose();
+    },
+    [shell, grid, quads, atlas],
+  );
+
+  useFrame(({ camera }) => {
+    if (mat.current) mat.current.uniforms.uCamPos.value.copy(camera.position);
+  });
+
   if (!show) return null;
   return (
-    <lineSegments geometry={geo}>
-      <lineBasicMaterial color="#c89050" transparent opacity={0.18} />
-    </lineSegments>
+    <group>
+      <lineSegments geometry={shell}>
+        <lineBasicMaterial color="#c89050" transparent opacity={0.1} />
+      </lineSegments>
+      <lineSegments geometry={grid}>
+        <lineBasicMaterial color="#c89050" transparent opacity={0.26} depthWrite={false} />
+      </lineSegments>
+      <mesh geometry={quads} renderOrder={4} frustumCulled={false}>
+        <shaderMaterial
+          ref={mat}
+          vertexShader={COORD_VERT}
+          fragmentShader={COORD_FRAG}
+          uniforms={uniforms}
+          transparent
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
   );
 }
 
+/** Equator of the cage radius, so the ring reads even with the cage off. */
 export function HerePin() {
   const here = useAtlas((s) => s.here);
   if (!here) return null;
@@ -60,19 +116,72 @@ export function HerePin() {
   );
 }
 
-export function Station() {
+/** Orbit ahead and behind the current fix — one line, rebuilt per poll. */
+export function IssTrack() {
   const show = useAtlas((s) => s.showIss);
   const iss = useAtlas((s) => s.iss);
+  const asc = useAtlas((s) => s.issAsc);
+
+  const geo = useMemo(() => {
+    if (!iss) return null;
+    const r = 1 + Math.max(0.04, iss.alt / 6371);
+    const pts = groundTrack({ lat: iss.lat, lon: iss.lon, ascending: asc });
+    const p = new Float32Array(pts.length * 3);
+    pts.forEach((s, i) => {
+      const v = ll2xyz(s.lat, s.lon, r);
+      p[i * 3] = v[0];
+      p[i * 3 + 1] = v[1];
+      p[i * 3 + 2] = v[2];
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+    return g;
+  }, [iss, asc]);
+
+  useEffect(() => () => geo?.dispose(), [geo]);
+
+  if (!show || !geo) return null;
+  return (
+    <line>
+      <primitive object={geo} attach="geometry" />
+      <lineBasicMaterial color="#4c8dff" transparent opacity={0.34} depthWrite={false} />
+    </line>
+  );
+}
+
+const UP = new THREE.Vector3();
+const FWD = new THREE.Vector3();
+const SIDE = new THREE.Vector3();
+const AHEAD = new THREE.Vector3();
+const BASIS = new THREE.Matrix4();
+
+export function Station() {
+  const show = useAtlas((s) => s.showIss);
+  // On the ride the camera is inside it — the pin would be a wall.
+  const ride = useAtlas((s) => s.issRide);
   const ref = useRef<THREE.Group>(null);
 
   useFrame(() => {
+    const s = useAtlas.getState();
+    const iss = s.iss;
     if (!ref.current || !iss) return;
-    const p = ll2xyz(iss.lat, iss.lon, 1 + Math.max(0.04, iss.alt / 6371));
-    ref.current.position.set(...p);
-    ref.current.lookAt(0, 0, 0);
+    const r = 1 + Math.max(0.04, iss.alt / 6371);
+    const p = ll2xyz(iss.lat, iss.lon, r);
+    ref.current.position.set(p[0], p[1], p[2]);
+    // Nose along the track, panels across it — not a box pointed at the core.
+    const head =
+      (trackHeading({ lat: iss.lat, lon: iss.lon, ascending: s.issAsc }) * Math.PI) / 180;
+    const a = ll2xyz(iss.lat + Math.cos(head) * 0.6, iss.lon + Math.sin(head) * 0.6, r);
+    AHEAD.set(a[0], a[1], a[2]);
+    UP.copy(ref.current.position).normalize();
+    FWD.copy(AHEAD).sub(ref.current.position).normalize();
+    SIDE.crossVectors(UP, FWD).normalize();
+    FWD.crossVectors(SIDE, UP).normalize();
+    BASIS.makeBasis(SIDE, UP, FWD);
+    ref.current.quaternion.setFromRotationMatrix(BASIS);
   });
 
-  if (!show) return null;
+  if (!show || ride) return null;
   return (
     <group ref={ref}>
       <mesh>
@@ -121,7 +230,12 @@ export function Luna() {
     <group ref={group}>
       <mesh>
         <sphereGeometry args={[MOON_RADIUS, 48, 32]} />
-        <shaderMaterial ref={mat} vertexShader={MOON_VERT} fragmentShader={MOON_FRAG} uniforms={uniforms} />
+        <shaderMaterial
+          ref={mat}
+          vertexShader={MOON_VERT}
+          fragmentShader={MOON_FRAG}
+          uniforms={uniforms}
+        />
       </mesh>
     </group>
   );

@@ -48,6 +48,8 @@ type AtlasState = {
   showBorders: boolean;
   showCage: boolean;
   showIss: boolean;
+  /** Camera parked on the station, not orbiting the globe. */
+  issRide: boolean;
   showMoon: boolean;
   showTides: boolean;
   cupola: boolean;
@@ -56,6 +58,8 @@ type AtlasState = {
   focus: Focus | null;
   here: { lat: number; lon: number } | null;
   iss: IssFix | null;
+  /** Northbound leg of the orbit — the ground track needs the branch. */
+  issAsc: boolean;
   setNames: (n: string[]) => void;
   select: (name: string | null) => void;
   setSunLon: (v: number) => void;
@@ -71,11 +75,15 @@ type AtlasState = {
   flyTo: (f: Focus) => void;
   setHere: (here: { lat: number; lon: number } | null) => void;
   setIss: (iss: IssFix | null) => void;
+  rideIss: (on: boolean) => void;
   calmMotion: () => void;
   tickOrbits: () => void;
 };
 
 const boot = skyAt();
+
+/** The cupola glass the ride borrows, handed back when the ride ends. */
+let cupolaBeforeRide = false;
 
 export const useAtlas = create<AtlasState>((set, get) => ({
   names: [],
@@ -97,6 +105,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   showBorders: true,
   showCage: false,
   showIss: true,
+  issRide: false,
   showMoon: true,
   showTides: false,
   cupola: false,
@@ -105,6 +114,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   focus: focusOf(HOME),
   here: null,
   iss: null,
+  issAsc: true,
   setNames: (names) => set({ names }),
   select: (selected) => set({ selected }),
   setSunLon: (sunLon) => set({ sunLon }),
@@ -119,11 +129,32 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   toggle: (k) => set({ [k]: !get()[k] } as Partial<AtlasState>),
   /** State for the HUD, command for the rig. */
   flyTo: (focus) => {
-    set({ focus });
+    // Any destination is an exit from the ride: the rig owns the camera again.
+    set({ focus, issRide: false });
     requestFly(focus);
   },
   setHere: (here) => set({ here }),
-  setIss: (iss) => set({ iss }),
+  setIss: (iss) => {
+    const prev = get().iss;
+    const issAsc = iss && prev && iss.lat !== prev.lat ? iss.lat > prev.lat : get().issAsc;
+    set({ iss, issAsc });
+  },
+  /** The ride is a frame, not a place — cupola glass comes with it. */
+  rideIss: (on) => {
+    if (on) {
+      // Re-entering an active ride must not record the glass the ride itself
+      // turned on — otherwise leaving never gives the window back.
+      if (!get().issRide) cupolaBeforeRide = get().cupola;
+      set({ issRide: true, showIss: true, cupola: true, autoRotate: false });
+      return;
+    }
+    const iss = get().iss;
+    set({ cupola: cupolaBeforeRide });
+    // flyTo clears issRide and gives the rig somewhere to put the camera back.
+    get().flyTo(
+      iss ? { lat: iss.lat, lon: iss.lon, label: "ISS", dist: 2.6, site: "iss" } : focusOf(HOME),
+    );
+  },
   calmMotion: () => set({ autoSun: true, autoMoon: true, autoRotate: false }),
   tickOrbits: () => {
     const s = get();
