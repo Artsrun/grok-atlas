@@ -1,7 +1,8 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { centroidOf, type CountryFeat } from "@/lib/atlas/geo";
 import { focusForCountry } from "@/lib/atlas/fly";
 import { focusOf, HOME, VIEWS } from "@/lib/atlas/model";
+import { useFinePointer } from "@/lib/atlas/pointer";
 import { useAtlas } from "@/lib/atlas/store";
 import { springLabel, tideAt, tideMeters } from "@/lib/atlas/tide";
 import { deviceCaps } from "@/lib/atlas/device";
@@ -26,8 +27,24 @@ function Tag({ kind, children }: { kind: "m" | "d" | "c" | "x"; children: string
           : "text-rust border-rust";
   return (
     <span
-      className={`inline-block border px-1 py-px font-mono text-[8px] uppercase leading-none tracking-[0.16em] ${cls}`}
+      className={`inline-block border px-1 py-px font-mono text-micro uppercase leading-none tracking-[0.16em] ${cls}`}
     >
+      {children}
+    </span>
+  );
+}
+
+function Tip({
+  text,
+  end,
+  children,
+}: {
+  text: string;
+  end?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <span className={`tip block ${end ? "tip-end" : ""}`} data-tip={text}>
       {children}
     </span>
   );
@@ -46,36 +63,55 @@ type ToggleId =
   | "autoMoon"
   | "autoRotate";
 
+const LAYER_TIPS: Record<ToggleId, string> = {
+  showAtmosphere: "Limb airglow. Cheap pass.",
+  showClouds: "Drifting cloud deck.",
+  showBorders: "Natural Earth 110m outlines.",
+  showCage: "Geodesic shell. Visual only.",
+  showIss: "Live ZARYA pin, 5 s poll.",
+  showMoon: "Phase disc, declared range.",
+  showTides: "P2 lunar + 0.46 solar bulge.",
+  cupola: "Window vignette. ISS frame.",
+  autoSun: "Clock-true terminator.",
+  autoMoon: "Clock-true moon longitude.",
+  autoRotate: "Idle orbit. Stops on drag.",
+};
+
 function LayerToggle({ id, label }: { id: ToggleId; label: string }) {
   const on = useAtlas((s) => s[id]);
   return (
-    <button
-      type="button"
-      aria-pressed={on}
-      onClick={() => useAtlas.getState().toggle(id)}
-      className={`min-h-11 border border-etch px-2 font-mono text-2xs uppercase tracking-[0.12em] ${
-        on ? "bg-substrate-2 text-silk" : "text-dimmer"
-      }`}
-    >
-      {label}
-    </button>
+    <Tip text={LAYER_TIPS[id]} end>
+      <button
+        type="button"
+        aria-pressed={on}
+        aria-label={`${label}. ${LAYER_TIPS[id]}`}
+        onClick={() => useAtlas.getState().toggle(id)}
+        className={`press min-h-11 w-full border border-etch px-2 font-mono text-2xs uppercase tracking-[0.12em] transition-colors duration-150 ${
+          on ? "bg-substrate-2 text-silk" : "text-dimmer hover:text-silk"
+        }`}
+      >
+        {label}
+      </button>
+    </Tip>
   );
 }
 
-function Clock() {
+function Clock({ compact }: { compact?: boolean }) {
   const [t, setT] = useState("—");
   useEffect(() => {
     const tick = () => {
       const d = new Date();
       const p = (n: number) => String(n).padStart(2, "0");
       setT(
-        `${d.getUTCFullYear()}.${p(d.getUTCMonth() + 1)}.${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`,
+        compact
+          ? `${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`
+          : `${d.getUTCFullYear()}.${p(d.getUTCMonth() + 1)}.${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`,
       );
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [compact]);
   return (
     <span className="font-mono text-xs font-medium tabular-nums text-ochre">
       <time dateTime={t}>{t}</time>
@@ -83,7 +119,7 @@ function Clock() {
   );
 }
 
-function Ticker({ count }: { count: number }) {
+function Ticker({ count, fine }: { count: number; fine: boolean }) {
   const selected = useAtlas((s) => s.selected);
   const sun = useSunDeg();
   const moon = useMoonDeg();
@@ -96,7 +132,7 @@ function Ticker({ count }: { count: number }) {
       <span className="shrink-0 border-r border-etch px-3 py-1.5">sun {sun}°</span>
       <span className="shrink-0 border-r border-etch px-3 py-1.5">moon {moon}°</span>
       <span className="min-w-0 flex-1 px-3 py-1.5 text-right text-dimmer">
-        drag to orbit · scroll zoom · tap a country
+        {fine ? "drag orbit · wheel zoom · click country" : "drag · pinch · tap country"}
       </span>
     </div>
   );
@@ -117,7 +153,7 @@ function TideGauge({ countries }: { countries: CountryFeat[] }) {
   const width = Math.min(50, (Math.abs(raw) / 1.5) * 50);
 
   return (
-    <div className="pointer-events-none absolute bottom-2 left-2 z-20 max-w-[min(280px,46vw)]">
+    <div className="pointer-events-none max-w-[min(280px,46vw)]">
       <div className="mb-1 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.16em] text-dimmer">
         <span>Tide · {where}</span>
         <b className="font-medium text-ochre">{springLabel(moon, sun)}</b>
@@ -143,6 +179,7 @@ function TideGauge({ countries }: { countries: CountryFeat[] }) {
 
 function Slider({
   label,
+  tip,
   value,
   min,
   max,
@@ -150,6 +187,7 @@ function Slider({
   format,
 }: {
   label: string;
+  tip: string;
   value: number;
   min: number;
   max: number;
@@ -159,12 +197,14 @@ function Slider({
   const id = `inst-${label.replace(/\W+/g, "-").toLowerCase()}`;
   return (
     <>
-      <label
-        htmlFor={id}
-        className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer"
-      >
-        {label} <b className="float-right font-medium text-ochre">{format(value)}</b>
-      </label>
+      <Tip text={tip}>
+        <label
+          htmlFor={id}
+          className="mt-2 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer"
+        >
+          {label} <b className="float-right font-medium text-ochre">{format(value)}</b>
+        </label>
+      </Tip>
       <input
         id={id}
         className="inst"
@@ -172,13 +212,14 @@ function Slider({
         min={min}
         max={max}
         value={value}
+        aria-label={`${label}. ${tip}`}
         onChange={(e) => onChange(+e.target.value)}
       />
     </>
   );
 }
 
-function ShellSection() {
+function ShellSection({ compact }: { compact: boolean }) {
   const nightGain = useAtlas((s) => s.nightGain);
   const bump = useAtlas((s) => s.bump);
   const tideGain = useAtlas((s) => s.tideGain);
@@ -188,15 +229,11 @@ function ShellSection() {
   const st = useAtlas.getState;
   const cap = deviceCaps();
 
-  return (
-    <section className="border-b border-etch p-3">
-      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-        <span className="text-ochre">§03</span>
-        <span className="font-semibold tracking-[0.2em]">Shell</span>
-        <span className="text-dimmer">FIG.4</span>
-      </div>
+  const sliders = (
+    <>
       <Slider
         label="Night gain"
+        tip="Night-side city lights. ISS cupola look."
         min={40}
         max={300}
         value={Math.round(nightGain * 100)}
@@ -205,6 +242,7 @@ function ShellSection() {
       />
       <Slider
         label="Relief / bump"
+        tip="Normal-map bump on land."
         min={0}
         max={250}
         value={Math.round(bump * 100)}
@@ -213,6 +251,7 @@ function ShellSection() {
       />
       <Slider
         label="Subsolar longitude"
+        tip="Sun longitude. Turns off sun drift."
         min={0}
         max={359}
         value={sun % 360}
@@ -224,6 +263,7 @@ function ShellSection() {
       />
       <Slider
         label="Moon longitude"
+        tip="Moon along the equator. Turns off moon drift."
         min={0}
         max={359}
         value={(moon + 360) % 360}
@@ -235,6 +275,7 @@ function ShellSection() {
       />
       <Slider
         label="Tide gain"
+        tip="Ocean bulge scale. Needs tides on."
         min={0}
         max={220}
         value={Math.round(tideGain * 100)}
@@ -243,6 +284,7 @@ function ShellSection() {
       />
       <Slider
         label="Grain · lights / relief"
+        tip="ISS grain on lights and land. Off on compat GPUs."
         min={0}
         max={150}
         value={Math.round(grainMix * 100)}
@@ -254,6 +296,26 @@ function ShellSection() {
       <p className="mt-2 font-mono text-2xs uppercase tracking-wide text-dimmer">
         gpu {cap.label} · {cap.webgl2 ? "webgl2" : "webgl1"} · dpr {cap.dpr[1]}
       </p>
+    </>
+  );
+
+  return (
+    <section className="border-b border-etch p-3">
+      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+        <span className="text-ochre">§03</span>
+        <span className="font-semibold tracking-[0.2em]">Shell</span>
+        <span className="text-dimmer">FIG.4</span>
+      </div>
+      {compact ? (
+        <details>
+          <summary className="press min-h-11 cursor-pointer list-none font-mono text-2xs uppercase tracking-[0.14em] text-ochre">
+            Sliders · night / bump / grain
+          </summary>
+          {sliders}
+        </details>
+      ) : (
+        sliders
+      )}
       <div className="mt-3 grid grid-cols-2 gap-1">
         <LayerToggle id="showAtmosphere" label="atmosphere" />
         <LayerToggle id="showClouds" label="clouds" />
@@ -286,7 +348,6 @@ function TiltSection() {
   const [gyro, setGyro] = useState({ a: "—", b: "—", g: "—" });
 
   useEffect(() => {
-    // Only listen while tilt is live — the handler fires ~60 Hz per device.
     if (!tiltOn) {
       setGyro({ a: "—", b: "—", g: "—" });
       return;
@@ -310,34 +371,36 @@ function TiltSection() {
         <span className="font-semibold tracking-[0.2em]">Device tilt</span>
         <span className="text-dimmer">FIG.5</span>
       </div>
-      <button
-        type="button"
-        aria-pressed={tiltOn}
-        className={`flex min-h-11 w-full items-center justify-between border px-3 font-mono text-xs uppercase tracking-[0.16em] ${
-          tiltOn ? "border-rust text-rust" : "border-ochre text-ochre"
-        }`}
-        onClick={async () => {
-          const st = useAtlas.getState();
-          if (st.tiltOn) {
-            st.toggle("tiltOn");
-            return;
-          }
-          const DOE = DeviceOrientationEvent as unknown as {
-            requestPermission?: () => Promise<string>;
-          };
-          if (typeof DOE.requestPermission === "function") {
-            try {
-              if ((await DOE.requestPermission()) !== "granted") return;
-            } catch {
+      <Tip text="iOS asks once. Current pose becomes home.">
+        <button
+          type="button"
+          aria-pressed={tiltOn}
+          className={`press flex min-h-11 w-full items-center justify-between border px-3 font-mono text-xs uppercase tracking-[0.16em] ${
+            tiltOn ? "border-rust text-rust" : "border-ochre text-ochre"
+          }`}
+          onClick={async () => {
+            const st = useAtlas.getState();
+            if (st.tiltOn) {
+              st.toggle("tiltOn");
               return;
             }
-          }
-          st.toggle("tiltOn");
-        }}
-      >
-        {tiltOn ? "Stop · recalibrate" : "Use device tilt"}
-        <span aria-hidden>{tiltOn ? "▮▮" : "◉"}</span>
-      </button>
+            const DOE = DeviceOrientationEvent as unknown as {
+              requestPermission?: () => Promise<string>;
+            };
+            if (typeof DOE.requestPermission === "function") {
+              try {
+                if ((await DOE.requestPermission()) !== "granted") return;
+              } catch {
+                return;
+              }
+            }
+            st.toggle("tiltOn");
+          }}
+        >
+          {tiltOn ? "Stop · recalibrate" : "Use device tilt"}
+          <span aria-hidden>{tiltOn ? "▮▮" : "◉"}</span>
+        </button>
+      </Tip>
       <div className="mt-2 grid grid-cols-3 gap-px bg-etch">
         {[
           ["α", gyro.a],
@@ -345,7 +408,7 @@ function TiltSection() {
           ["γ", gyro.g],
         ].map(([k, v]) => (
           <div key={k} className="bg-substrate-2 px-2 py-2 text-center">
-            <div className="font-mono text-[8px] tracking-[0.16em] text-dimmer">{k}</div>
+            <div className="font-mono text-micro tracking-[0.16em] text-dimmer">{k}</div>
             <div className="font-mono text-sm tabular-nums">{v}</div>
           </div>
         ))}
@@ -353,6 +416,24 @@ function TiltSection() {
       <p className="mt-2 font-mono text-2xs uppercase tracking-wide text-dimmer">
         {tiltOn ? "Live — current pose is home" : "Tilt off — drag to rotate"}
       </p>
+    </section>
+  );
+}
+
+function PointerSection() {
+  return (
+    <section className="p-3">
+      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+        <span className="text-ochre">§04</span>
+        <span className="font-semibold tracking-[0.2em]">Pointer</span>
+        <span className="text-dimmer">FIG.5</span>
+      </div>
+      <ul className="space-y-1 font-mono text-2xs uppercase leading-5 tracking-wide text-dim">
+        <li>drag — orbit</li>
+        <li>wheel — zoom</li>
+        <li>click — pick country</li>
+        <li>idle orbit — layer toggle</li>
+      </ul>
       <div className="mt-3 font-mono text-2xs uppercase tracking-wide text-dimmer">
         overlay <Tag kind="x">declared</Tag> · textures <Tag kind="m">measured</Tag>
       </div>
@@ -360,14 +441,19 @@ function TiltSection() {
   );
 }
 
-export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet: () => void }) {
+function ViewsSection({
+  countries,
+  names,
+  compact,
+}: {
+  countries: CountryFeat[];
+  names: string[];
+  compact: boolean;
+}) {
   const selected = useAtlas((s) => s.selected);
-  const panelOpen = useAtlas((s) => s.panelOpen);
   const site = useAtlas((s) => s.focus?.site);
   const [copied, setCopied] = useState(false);
   const [search, setSearch] = useState("");
-
-  const names = useMemo(() => countries.map((c) => c.name).sort(), [countries]);
 
   const goCountry = (n: string) => {
     const c = countries.find((x) => x.name === n);
@@ -377,17 +463,146 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
   };
 
   return (
+    <section className="border-b border-etch p-3">
+      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+        <span className="text-ochre">§02</span>
+        <span className="font-semibold tracking-[0.2em]">Views</span>
+        <span className="text-dimmer">FIG.3</span>
+      </div>
+      {!compact && (
+        <div className="grid gap-1">
+          {VIEWS.map((s) => (
+            <Tip key={s.id} text={s.note} end>
+              <button
+                type="button"
+                className="press flex min-h-11 w-full items-center justify-between border border-etch px-2 text-left"
+                onClick={() => {
+                  useAtlas.getState().select(null);
+                  useAtlas.getState().flyTo(focusOf(s));
+                }}
+              >
+                <span className="font-mono text-xs text-silk">{s.label}</span>
+                <span className="font-mono text-2xs text-dimmer">{s.note}</span>
+              </button>
+            </Tip>
+          ))}
+        </div>
+      )}
+      {compact && (
+        <div className="chip-row mb-2 flex gap-1 overflow-x-auto">
+          {VIEWS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="press min-h-11 shrink-0 border border-etch px-3 font-mono text-2xs uppercase tracking-[0.12em] text-silk"
+              onClick={() => {
+                useAtlas.getState().select(null);
+                useAtlas.getState().flyTo(focusOf(s));
+              }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className={`${compact ? "" : "mt-2"} flex gap-1`}>
+        <input
+          className="min-h-11 min-w-0 flex-1 border border-etch bg-transparent px-2 font-mono text-xs"
+          list="atlas-countries"
+          aria-label="Find country"
+          placeholder="find country…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            const n = names.find((x) => x.toLowerCase() === search.trim().toLowerCase());
+            if (n) {
+              goCountry(n);
+              setSearch("");
+            }
+          }}
+        />
+        <CountryList names={names} />
+      </div>
+      <button
+        type="button"
+        className="press mt-2 min-h-11 w-full border border-etch font-mono text-2xs uppercase tracking-[0.12em] text-dim hover:text-silk"
+        onClick={async () => {
+          const p = new URLSearchParams();
+          if (selected) p.set("c", selected);
+          else if (site) p.set("site", site);
+          const url = `${location.origin}${location.pathname}${p.toString() ? `?${p}` : ""}`;
+          try {
+            await navigator.clipboard?.writeText(url);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          } catch {
+            /* clipboard blocked */
+          }
+        }}
+      >
+        {copied ? "Copied" : "Copy view"}
+      </button>
+    </section>
+  );
+}
+
+function MobileDock() {
+  const panelOpen = useAtlas((s) => s.panelOpen);
+  return (
+    <div
+      className="pointer-events-auto absolute inset-x-2 z-30 flex flex-col gap-1"
+      style={{ bottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+    >
+      {!panelOpen && (
+        <div className="chip-row flex gap-1 overflow-x-auto">
+          {VIEWS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="press min-h-11 shrink-0 border border-etch bg-substrate px-3 font-mono text-2xs uppercase tracking-[0.12em] text-silk"
+              onClick={() => {
+                useAtlas.getState().select(null);
+                useAtlas.getState().flyTo(focusOf(s));
+              }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        aria-expanded={panelOpen}
+        aria-controls="atlas-panel"
+        className="press min-h-11 w-full border border-ochre bg-substrate font-mono text-2xs uppercase tracking-[0.16em] text-ochre"
+        onClick={() => useAtlas.getState().toggle("panelOpen")}
+      >
+        {panelOpen ? "Close toolbox" : "Toolbox"}
+      </button>
+    </div>
+  );
+}
+
+export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet: () => void }) {
+  const selected = useAtlas((s) => s.selected);
+  const panelOpen = useAtlas((s) => s.panelOpen);
+  const fine = useFinePointer();
+  const names = useMemo(() => countries.map((c) => c.name).sort(), [countries]);
+
+  return (
     <>
       <header className="pointer-events-auto absolute inset-x-2 top-2 z-20 grid grid-cols-[1fr_auto] border border-etch bg-substrate md:grid-cols-[1fr_auto_auto_auto]">
         <div className="flex items-center gap-2 border-r border-etch px-3 py-2">
-          <button
-            type="button"
-            onClick={onQuiet}
-            title="back to the quiet edition"
-            className="font-display text-sm font-bold tracking-[0.18em]"
-          >
-            GROK<span className="text-ochre">.ATLAS</span>
-          </button>
+          <Tip text="Quiet edition. Same globe.">
+            <button
+              type="button"
+              onClick={onQuiet}
+              className="press font-display text-sm font-bold tracking-[0.18em]"
+            >
+              GROK<span className="text-ochre">.ATLAS</span>
+            </button>
+          </Tip>
           <span className="hidden font-mono text-2xs uppercase tracking-[0.16em] text-dimmer sm:inline">
             / cupola / v2.0
           </span>
@@ -406,53 +621,64 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
           <span className="hidden font-mono text-2xs uppercase tracking-[0.16em] text-dimmer sm:inline">
             UTC
           </span>
-          <Clock />
+          <Clock compact={!fine} />
         </div>
       </header>
 
-      <Ticker count={countries.length} />
+      <Ticker count={countries.length} fine={fine} />
 
-      <div className="pointer-events-none absolute left-4 top-1/2 z-20 hidden -translate-y-1/2 font-mono text-2xs leading-6 tracking-wide text-dim md:block">
-        {[
-          ["bg-ochre", "city lights"],
-          ["bg-lichen", "airglow limb"],
-          ["bg-bone", "moon"],
-          ["bg-defender", "high tide"],
-          ["bg-silk", "Yerevan"],
-          ["bg-rust", "Ararat"],
-        ].map(([dot, label]) => (
-          <div key={label}>
-            <i className={`mr-2 inline-block h-1.5 w-1.5 ${dot}`} />
-            {label}
-          </div>
-        ))}
-      </div>
+      {fine && (
+        <div className="pointer-events-none absolute left-4 top-1/2 z-20 hidden -translate-y-1/2 font-mono text-2xs leading-6 tracking-wide text-dim md:block">
+          {[
+            ["bg-ochre", "city lights"],
+            ["bg-lichen", "airglow limb"],
+            ["bg-bone", "moon"],
+            ["bg-defender", "high tide"],
+            ["bg-silk", "Yerevan"],
+            ["bg-rust", "Ararat"],
+          ].map(([dot, label]) => (
+            <div key={label}>
+              <i className={`mr-2 inline-block h-1.5 w-1.5 ${dot}`} />
+              {label}
+            </div>
+          ))}
+        </div>
+      )}
 
-      <TideGauge countries={countries} />
+      {fine && (
+        <div className="pointer-events-none absolute bottom-2 left-2 z-20">
+          <TideGauge countries={countries} />
+        </div>
+      )}
 
-      <div className="pointer-events-none absolute bottom-2 right-2 z-20 hidden text-right font-mono text-2xs leading-5 tracking-wide text-dimmer sm:block">
-        textures <span className="text-lichen">MEASURED</span>
-        <br />
-        moon range <span className="text-rust">DECLARED</span> · 2.72 R⊕ (real ~60)
-        <br />
-        ISS inclination 51.6° · Nile cupola home
-      </div>
+      {fine && (
+        <div className="pointer-events-none absolute bottom-2 right-2 z-20 hidden text-right font-mono text-2xs leading-5 tracking-wide text-dimmer sm:block">
+          textures <span className="text-lichen">MEASURED</span>
+          <br />
+          moon range <span className="text-rust">DECLARED</span> · 2.72 R⊕ (real ~60)
+          <br />
+          ISS inclination 51.6° · drag to orbit
+        </div>
+      )}
 
-      <button
-        type="button"
-        aria-expanded={panelOpen}
-        aria-controls="atlas-panel"
-        className="pointer-events-auto absolute right-2 top-[88px] z-30 min-h-11 border border-ochre bg-substrate px-3 font-mono text-2xs uppercase tracking-[0.16em] text-ochre md:hidden"
-        onClick={() => useAtlas.getState().toggle("panelOpen")}
-      >
-        {panelOpen ? "Close data" : "Open data"}
-      </button>
+      {!fine && <MobileDock />}
 
       <aside
         id="atlas-panel"
-        className={`hud-scroll pointer-events-auto absolute right-2 top-[88px] z-20 w-[min(320px,calc(100%-1rem))] overflow-y-auto border border-etch bg-substrate md:bottom-[52px] md:top-[88px] ${
-          panelOpen ? "block max-h-[min(70dvh,640px)] md:max-h-none" : "hidden md:block"
+        data-open={fine || panelOpen ? "true" : "false"}
+        aria-hidden={!fine && !panelOpen}
+        className={`hud-scroll tray pointer-events-auto z-20 overflow-y-auto border border-etch bg-substrate ${
+          !fine && !panelOpen ? "invisible" : ""
+        } ${
+          fine
+            ? "absolute right-2 top-[88px] bottom-[52px] w-[min(320px,calc(100%-1rem))]"
+            : "absolute inset-x-2 max-h-[min(52dvh,520px)]"
         }`}
+        style={
+          fine
+            ? undefined
+            : { bottom: "calc(max(0.5rem, env(safe-area-inset-bottom)) + 3.25rem)" }
+        }
       >
         {selected && (
           <section className="border-b border-etch p-3">
@@ -464,7 +690,7 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
             <div className="font-display text-lg tracking-wide text-silk">{selected}</div>
             <button
               type="button"
-              className="mt-2 min-h-11 w-full border border-etch font-mono text-2xs uppercase tracking-[0.12em] text-dim hover:text-silk"
+              className="press mt-2 min-h-11 w-full border border-etch font-mono text-2xs uppercase tracking-[0.12em] text-dim hover:text-silk"
               onClick={() => useAtlas.getState().select(null)}
             >
               Clear
@@ -472,70 +698,15 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
           </section>
         )}
 
-        <section className="border-b border-etch p-3">
-          <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-            <span className="text-ochre">§02</span>
-            <span className="font-semibold tracking-[0.2em]">Views</span>
-            <span className="text-dimmer">FIG.3</span>
+        {!fine && (
+          <div className="border-b border-etch p-3">
+            <TideGauge countries={countries} />
           </div>
-          <div className="grid gap-1">
-            {VIEWS.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className="flex min-h-11 items-center justify-between border border-etch px-2 text-left"
-                onClick={() => {
-                  useAtlas.getState().select(null);
-                  useAtlas.getState().flyTo(focusOf(s));
-                }}
-              >
-                <span className="font-mono text-xs text-silk">{s.label}</span>
-                <span className="font-mono text-2xs text-dimmer">{s.note}</span>
-              </button>
-            ))}
-          </div>
-          <div className="mt-2 flex gap-1">
-            <input
-              className="min-h-11 min-w-0 flex-1 border border-etch bg-transparent px-2 font-mono text-xs"
-              list="atlas-countries"
-              aria-label="Find country"
-              placeholder="find country…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key !== "Enter") return;
-                const n = names.find((x) => x.toLowerCase() === search.trim().toLowerCase());
-                if (n) {
-                  goCountry(n);
-                  setSearch("");
-                }
-              }}
-            />
-            <CountryList names={names} />
-          </div>
-          <button
-            type="button"
-            className="mt-2 min-h-11 w-full border border-etch font-mono text-2xs uppercase tracking-[0.12em] text-dim hover:text-silk"
-            onClick={async () => {
-              const p = new URLSearchParams();
-              if (selected) p.set("c", selected);
-              else if (site) p.set("site", site);
-              const url = `${location.origin}${location.pathname}${p.toString() ? `?${p}` : ""}`;
-              try {
-                await navigator.clipboard?.writeText(url);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1200);
-              } catch {
-                // clipboard blocked (insecure origin / denied) — leave the label alone
-              }
-            }}
-          >
-            {copied ? "Copied" : "Copy view"}
-          </button>
-        </section>
+        )}
 
-        <ShellSection />
-        <TiltSection />
+        <ViewsSection countries={countries} names={names} compact={!fine} />
+        <ShellSection compact={!fine} />
+        {fine ? <PointerSection /> : <TiltSection />}
       </aside>
     </>
   );

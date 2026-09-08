@@ -21,6 +21,7 @@ import {
   watchReducedMotion,
 } from "@/lib/atlas/fly";
 import { HOME } from "@/lib/atlas/model";
+import { ORBIT, isFinePointer } from "@/lib/atlas/pointer";
 import { useAtlas } from "@/lib/atlas/store";
 import { deviceCaps } from "@/lib/atlas/device";
 import { Earth } from "./Earth";
@@ -30,7 +31,6 @@ import { Cage, HerePin, Luna, Starfield, Station, SunLight } from "./Extras";
 const HOME_POS = ll2xyz(HOME.lat, HOME.lon, HOME.dist);
 const ARRIVED_ANGLE = 0.014;
 const ARRIVED_RADIUS = 0.04;
-const TAP_SLOP = 6;
 /**
  * Parked below this speed, in earth radii per second — a rate, not a per-frame
  * step, so a 120 Hz phone and a 30 fps laptop agree on when the rig stopped.
@@ -89,6 +89,7 @@ function Rig() {
   const { camera } = useThree();
   const autoRotate = useAtlas((s) => s.autoRotate);
   const tiltOn = useAtlas((s) => s.tiltOn);
+  const feel = isFinePointer() ? ORBIT.fine : ORBIT.coarse;
 
   const fromDir = useRef(new THREE.Vector3());
   const toDir = useRef(new THREE.Vector3());
@@ -185,13 +186,13 @@ function Rig() {
       ref={controls as never}
       enablePan={false}
       enableDamping
-      dampingFactor={0.065}
+      dampingFactor={feel.damp}
       minDistance={MIN_DIST}
       maxDistance={MAX_DIST}
       autoRotate={autoRotate && !tiltOn}
       autoRotateSpeed={0.07}
-      rotateSpeed={0.48}
-      zoomSpeed={0.7}
+      rotateSpeed={feel.rotate}
+      zoomSpeed={feel.zoom}
       onStart={() => {
         path.current = null;
       }}
@@ -203,6 +204,7 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
   const { camera, scene, gl } = useThree();
   const ray = useMemo(() => new THREE.Raycaster(), []);
   const ptr = useMemo(() => new THREE.Vector2(), []);
+  const slop = isFinePointer() ? ORBIT.fine.tap : ORBIT.coarse.tap;
 
   useEffect(() => {
     const el = gl.domElement;
@@ -217,7 +219,7 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
       const from = start;
       start = null;
       if (!from || from.id !== e.pointerId) return;
-      if (Math.hypot(e.clientX - from.x, e.clientY - from.y) > TAP_SLOP) return;
+      if (Math.hypot(e.clientX - from.x, e.clientY - from.y) > slop) return;
       const earth = scene.getObjectByName("earth");
       if (!earth) return;
       const rect = el.getBoundingClientRect();
@@ -245,7 +247,7 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", cancel);
     };
-  }, [camera, scene, gl, countries, ray, ptr]);
+  }, [camera, scene, gl, countries, ray, ptr, slop]);
   return null;
 }
 

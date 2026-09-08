@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatSolar, solarHours } from "@/lib/atlas/ephemeris";
 import { pinHere } from "@/lib/atlas/locate";
+import { useFinePointer } from "@/lib/atlas/pointer";
 import { useAtlas } from "@/lib/atlas/store";
 
 function Clock() {
@@ -26,6 +27,7 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
   const caption = selected ?? focus?.label ?? "";
   const [hint, setHint] = useState(true);
   const [busy, setBusy] = useState(false);
+  const fine = useFinePointer();
 
   useEffect(() => {
     const id = setTimeout(() => setHint(false), 4000);
@@ -43,15 +45,20 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
       <button
         type="button"
         onClick={onInstrument}
-        className="pointer-events-auto absolute left-5 top-5 z-20 font-display text-sm font-medium tracking-[0.22em] text-silk/70"
-        title="open instrument"
+        className="tip press pointer-events-auto absolute left-5 z-20 font-display text-sm font-medium tracking-[0.22em] text-silk/70"
+        style={{ top: "max(1.25rem, env(safe-area-inset-top))" }}
+        data-tip="Open the instrument toolbox"
       >
         GROK<span className="text-ochre">.ATLAS</span>
       </button>
-      <div className="absolute right-5 top-5 z-20 flex items-center gap-3">
+      <div
+        className="absolute right-5 z-20 flex items-center gap-3"
+        style={{ top: "max(1.25rem, env(safe-area-inset-top))" }}
+      >
         <button
           type="button"
-          className="pointer-events-auto font-mono text-2xs uppercase tracking-[0.16em] text-ochre"
+          className="tip press pointer-events-auto min-h-11 px-1 font-mono text-2xs uppercase tracking-[0.16em] text-ochre"
+          data-tip="Pin this device and fly here"
           disabled={busy}
           onClick={async () => {
             setBusy(true);
@@ -68,7 +75,8 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
         {iss ? (
           <button
             type="button"
-            className="pointer-events-auto font-mono text-2xs uppercase tracking-[0.16em] text-dimmer"
+            className="tip press pointer-events-auto min-h-11 px-1 font-mono text-2xs uppercase tracking-[0.16em] text-dimmer"
+            data-tip="Fly to the station"
             onClick={() =>
               useAtlas.getState().flyTo({
                 lat: iss.lat,
@@ -84,7 +92,10 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
         <Clock />
       </div>
       {caption ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-10 z-20 text-center">
+        <div
+          className="pointer-events-none absolute inset-x-0 z-20 text-center"
+          style={{ bottom: "max(2.5rem, calc(env(safe-area-inset-bottom) + 1.5rem))" }}
+        >
           <div className="font-display text-lg tracking-wide text-silk">{caption}</div>
           {solar ? (
             <div className="mt-1 font-mono text-2xs uppercase tracking-[0.16em] text-dimmer">
@@ -93,8 +104,11 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
           ) : null}
         </div>
       ) : hint ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-10 z-20 text-center font-mono text-2xs uppercase tracking-[0.18em] text-dimmer">
-          locate · tap a country · track ISS
+        <div
+          className="pointer-events-none absolute inset-x-0 z-20 text-center font-mono text-2xs uppercase tracking-[0.18em] text-dimmer"
+          style={{ bottom: "max(2.5rem, calc(env(safe-area-inset-bottom) + 1.5rem))" }}
+        >
+          {fine ? "drag · click a country · GROK.ATLAS for toolbox" : "pinch · tap a country · toolbox in the name"}
         </div>
       ) : null}
     </>

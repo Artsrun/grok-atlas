@@ -21,6 +21,7 @@ import { cameraListeners, emitCamera, onCamera, onFlyRequest, requestFly } from 
 import { subsolarLat, OBLIQUITY } from "./sun.ts";
 import { elongation, springFactor, springLabel, tideAt } from "./tide.ts";
 import { classifyDevice } from "./device.ts";
+import { ORBIT, classifyPointer } from "./pointer.ts";
 
 type Bounds = CountryFeat["bounds"];
 
@@ -356,4 +357,18 @@ test("mid-tier mobile keeps a light grain and a cheaper sphere", () => {
   assert.equal(cap.tier, "mid");
   assert.ok(cap.grainLights > 0 && cap.grainLights < 0.6);
   assert.ok(cap.sphereSeg[0] < 96);
+});
+
+test("coarse orbit is heavier and ignores smaller taps than fine", () => {
+  assert.ok(ORBIT.coarse.rotate > ORBIT.fine.rotate);
+  assert.ok(ORBIT.coarse.zoom > ORBIT.fine.zoom);
+  assert.ok(ORBIT.coarse.tap > ORBIT.fine.tap);
+  assert.ok(ORBIT.coarse.damp > ORBIT.fine.damp);
+});
+
+test("pointer: hover-fine is desktop, coarse is toolbox, width is the fallback", () => {
+  assert.equal(classifyPointer({ hoverFine: true, coarse: false, wide: true }), true);
+  assert.equal(classifyPointer({ hoverFine: false, coarse: true, wide: true }), false, "iPad stays toolbox");
+  assert.equal(classifyPointer({ hoverFine: false, coarse: false, wide: true }), true, "headless wide");
+  assert.equal(classifyPointer({ hoverFine: false, coarse: false, wide: false }), false);
 });
