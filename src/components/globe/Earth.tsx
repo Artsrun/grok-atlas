@@ -4,13 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { markBoot } from "@/lib/atlas/boot";
 import { useAtlas } from "@/lib/atlas/store";
-import { ll2xyz } from "@/lib/atlas/geo";
+import { ll2xyzInto } from "@/lib/atlas/geo";
 import { moonXYZ } from "@/lib/atlas/tide";
 import { deviceCaps } from "@/lib/atlas/device";
 import { frameScale } from "@/lib/atlas/perf";
 import { ATMO_FRAG, ATMO_VERT, CLOUD_FRAG, CLOUD_VERT, EARTH_FRAG, EARTH_VERT } from "./shaders";
 
-function pixel(r: number, g: number, b: number) {
+/** Typed as the base Texture: these slots get a real map a moment later. */
+function pixel(r: number, g: number, b: number): THREE.Texture {
   const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
   t.needsUpdate = true;
   return t;
@@ -44,7 +45,19 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
     return g;
   }, [cap.sphereSeg]);
 
+  /**
+   * One sphere for both airglow shells. They differ by scale and a uniform, so
+   * two 64×48 geometries were two uploads and twice the vertex memory for the
+   * same 3k triangles. Phones get a coarser one — the shells are a soft fresnel
+   * wash, and nothing in them reads silhouette detail.
+   */
+  const atmoGeo = useMemo(() => {
+    const seg: [number, number] = cap.tier === "high" ? [64, 48] : [40, 28];
+    return new THREE.SphereGeometry(1, seg[0], seg[1]);
+  }, [cap.tier]);
+
   useEffect(() => () => geo.dispose(), [geo]);
+  useEffect(() => () => atmoGeo.dispose(), [atmoGeo]);
   useEffect(
     () => () => {
       placeholders.night.dispose();
@@ -100,7 +113,11 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
     (async () => {
       const night = await take("/earth/night.png", true);
       if (dead) return;
-      if (night && earthMat.current) earthMat.current.uniforms.uNight.value = night;
+      // Write through the uniforms object, not the material ref: the object is
+      // what the material holds, and it exists whether or not the mesh has
+      // mounted yet. A ref that is still null here loses the city lights for
+      // the rest of the session, and the boot strip leaves anyway.
+      if (night) uniforms.uNight.value = night;
       markBoot("night");
 
       if (cap.tier === "low") {
@@ -112,10 +129,8 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       const spec = await take("/earth/specular.jpg", false);
       const normal = await take("/earth/normal.jpg", false);
       if (dead) return;
-      if (earthMat.current) {
-        if (spec) earthMat.current.uniforms.uSpec.value = spec;
-        if (normal) earthMat.current.uniforms.uNormal.value = normal;
-      }
+      if (spec) uniforms.uSpec.value = spec;
+      if (normal) uniforms.uNormal.value = normal;
       markBoot("maps");
 
       const clouds = await take("/earth/clouds.png", true);
@@ -135,7 +150,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       dead = true;
       for (const t of held) t.dispose();
     };
-  }, [cap.anisotropy, cap.tier]);
+  }, [cap.anisotropy, cap.tier, uniforms]);
 
   const atmoU = useMemo(
     () => ({
@@ -177,8 +192,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
 
   useFrame(({ camera, clock }) => {
     const s = useAtlas.getState();
-    const xyz = ll2xyz(s.sunLat, s.sunLon, 1);
-    sunVec.set(xyz[0], xyz[1], xyz[2]);
+    ll2xyzInto(sunVec, s.sunLat, s.sunLon, 1);
     const m = moonXYZ(s.moonLon, 1, s.moonLat);
     moonVec.set(m[0], m[1], m[2]);
     const apply = (u: { uSun: { value: THREE.Vector3 }; uCamPos: { value: THREE.Vector3 } }) => {
@@ -233,8 +247,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       )}
       {showAtmo && (
         <>
-          <mesh scale={1.04} renderOrder={3}>
-            <sphereGeometry args={[1, 64, 48]} />
+          <mesh geometry={atmoGeo} scale={1.04} renderOrder={3}>
             <shaderMaterial
               ref={atmoIn}
               vertexShader={ATMO_VERT}
@@ -246,8 +259,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
               blending={THREE.AdditiveBlending}
             />
           </mesh>
-          <mesh scale={1.08} renderOrder={0}>
-            <sphereGeometry args={[1, 64, 48]} />
+          <mesh geometry={atmoGeo} scale={1.08} renderOrder={0}>
             <shaderMaterial
               ref={atmoMat}
               vertexShader={ATMO_VERT}

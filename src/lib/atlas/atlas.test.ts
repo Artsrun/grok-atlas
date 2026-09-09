@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DR, ll2xyz, xyz2ll } from "./geo.ts";
+import { DR, ll2xyz, ll2xyzInto, overlaySize, OVERLAY_W, OVERLAY_H, xyz2ll } from "./geo.ts";
 import type { CountryFeat } from "./geo.ts";
 import {
   boundsSpan,
@@ -40,7 +40,8 @@ import {
   groundTrack,
   trackHeading,
 } from "./orbit.ts";
-import { BOOT_STAGES, bootSnap, markBoot, resetBoot } from "./boot.ts";
+import { BOOT_STAGES, bootSnap, failBoot, markBoot, resetBoot } from "./boot.ts";
+import { useAtlas } from "./store.ts";
 
 type Bounds = CountryFeat["bounds"];
 
@@ -539,4 +540,59 @@ test("boot starts dark and fills in order", () => {
   assert.equal(bootSnap().progress, 1, "repeat marks do not inflate");
   resetBoot();
   assert.equal(bootSnap().progress, 0);
+});
+
+test("a failed stage still completes, and leaves a reason", () => {
+  resetBoot();
+  markBoot("gl");
+  markBoot("day");
+  markBoot("night");
+  assert.equal(bootSnap().note, null);
+  failBoot("atlas", "countries offline · no borders, no country tap");
+  assert.ok(bootSnap().done.has("atlas"), "a dead stage must not hang the strip");
+  assert.match(bootSnap().note ?? "", /countries offline/);
+  resetBoot();
+  assert.equal(bootSnap().note, null, "reset clears the note with the stages");
+});
+
+// ── hot-path geometry ──────────────────────────────────────────────────────
+
+test("ll2xyzInto writes what ll2xyz returns", () => {
+  const out = { x: 0, y: 0, z: 0 };
+  for (const [lat, lon, r] of [
+    [0, 0, 1],
+    [40.177, 44.487, 1.02],
+    [-33.9, 151.2, 2.6],
+    [51.64, -179.9, 1.066],
+  ]) {
+    const [x, y, z] = ll2xyz(lat, lon, r);
+    const same = ll2xyzInto(out, lat, lon, r);
+    assert.equal(same, out, "writes in place, returns the same object");
+    near(out.x, x, 1e-12);
+    near(out.y, y, 1e-12);
+    near(out.z, z, 1e-12);
+  }
+});
+
+test("selection wash drops resolution below the top tier", () => {
+  assert.deepEqual(overlaySize("high"), [OVERLAY_W, OVERLAY_H]);
+  for (const tier of ["mid", "low"] as const) {
+    const [w, h] = overlaySize(tier);
+    assert.ok(w < OVERLAY_W && h < OVERLAY_H);
+    assert.equal(w / h, OVERLAY_W / OVERLAY_H, "equirectangular stays 2:1");
+  }
+});
+
+test("the sky tick is paced, and still lands", () => {
+  const st = useAtlas.getState;
+  st().setAutoSun(true);
+  // The first tick is free — a cold store has to catch up with the clock.
+  st().tickOrbits();
+  st().setSunLon(0);
+  const parked = st().sunLon;
+  // After that, frame-sized steps must not each pay for an ephemeris read.
+  for (let i = 0; i < 14; i++) st().tickOrbits(1 / 60);
+  assert.equal(st().sunLon, parked, "a quarter second of frames is one tick");
+  st().tickOrbits(0.02);
+  assert.notEqual(st().sunLon, parked, "and when the tick lands, the sun moves");
 });

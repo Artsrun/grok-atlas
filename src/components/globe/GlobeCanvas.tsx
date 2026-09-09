@@ -3,7 +3,7 @@ import { OrbitControls } from "@react-three/drei";
 import { Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { CountryFeat } from "@/lib/atlas/geo";
-import { ll2xyz, OVERLAY_H, OVERLAY_W, paintAtlas, pickCountry, xyz2ll } from "@/lib/atlas/geo";
+import { ll2xyz, ll2xyzInto, overlaySize, paintAtlas, pickCountry, xyz2ll } from "@/lib/atlas/geo";
 import type { CameraAt } from "@/lib/atlas/camera";
 import { cameraListeners, emitCamera, onFlyRequest } from "@/lib/atlas/camera";
 import { hashAt } from "@/lib/atlas/hash";
@@ -162,7 +162,7 @@ function Rig() {
 
   useFrame((_, dt) => {
     const d = Math.min(dt, 0.05);
-    useAtlas.getState().tickOrbits();
+    useAtlas.getState().tickOrbits(dt);
     const st = useAtlas.getState();
     const c = controls.current;
 
@@ -171,9 +171,9 @@ function Rig() {
       path.current = null;
       const alt = 1 + Math.max(0.04, st.iss.alt / 6371);
       const fix = { lat: st.iss.lat, lon: st.iss.lon, ascending: st.issAsc };
-      ridePos.current.set(...ll2xyz(fix.lat, fix.lon, alt + CUPOLA_LIFT));
+      ll2xyzInto(ridePos.current, fix.lat, fix.lon, alt + CUPOLA_LIFT);
       const ahead = advanceTrack(fix, CUPOLA_LEAD);
-      rideLook.current.set(...ll2xyz(ahead.lat, ahead.lon, 1));
+      ll2xyzInto(rideLook.current, ahead.lat, ahead.lon, 1);
       rideMat.current.lookAt(ridePos.current, rideLook.current, ridePos.current);
       rideQuat.current.setFromRotationMatrix(rideMat.current);
       // Arriving is the ride starting, not a flight: take the seat outright,
@@ -409,15 +409,16 @@ function Scene({
 export function GlobeCanvas({ countries }: { countries: CountryFeat[] }) {
   const cap = deviceCaps();
   const atlasTex = useMemo(() => {
+    const [w, h] = overlaySize(cap.tier);
     const cv = document.createElement("canvas");
-    cv.width = OVERLAY_W;
-    cv.height = OVERLAY_H;
+    cv.width = w;
+    cv.height = h;
     const t = new THREE.CanvasTexture(cv);
     t.colorSpace = THREE.SRGBColorSpace;
     t.minFilter = THREE.LinearFilter;
     t.magFilter = THREE.LinearFilter;
     return t;
-  }, []);
+  }, [cap.tier]);
 
   useEffect(() => () => atlasTex.dispose(), [atlasTex]);
 

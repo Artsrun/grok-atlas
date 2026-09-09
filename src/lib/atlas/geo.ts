@@ -42,6 +42,24 @@ export function ll2xyz(lat: number, lon: number, r = 1): [number, number, number
   return [-r * Math.sin(phi) * Math.cos(th), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(th)];
 }
 
+/** Anything with x/y/z — a THREE.Vector3 without importing three into geo. */
+export type Vec3Like = { x: number; y: number; z: number };
+
+/**
+ * `ll2xyz` for the hot path. The array version allocates, and the per-frame
+ * callers (sun, moon, station, ride seat) run it two or three times a frame —
+ * on a phone that is a few hundred short-lived arrays a second, for nothing.
+ */
+export function ll2xyzInto<T extends Vec3Like>(out: T, lat: number, lon: number, r = 1): T {
+  const phi = (90 - lat) * DR;
+  const th = (lon + 180) * DR;
+  const s = Math.sin(phi);
+  out.x = -r * s * Math.cos(th);
+  out.y = r * Math.cos(phi);
+  out.z = r * s * Math.sin(th);
+  return out;
+}
+
 export function xyz2ll(x: number, y: number, z: number): LL {
   const r = Math.hypot(x, y, z) || 1;
   const lat = 90 - Math.acos(Math.max(-1, Math.min(1, y / r))) / DR;
@@ -90,6 +108,15 @@ export const centroidOf = (c: CountryFeat): LL => c.centroid;
 export const OVERLAY_W = 2048;
 export const OVERLAY_H = 1024;
 
+/**
+ * Selection wash resolution. Every country tap repaints this canvas and
+ * re-uploads all of it: at 2048×1024 that is an 8 MB texture upload on the
+ * frame of the tap, which a phone feels. The wash is a soft fill under a 1.8px
+ * outline, so half the axis costs it almost nothing.
+ */
+export const overlaySize = (tier: "low" | "mid" | "high"): [number, number] =>
+  tier === "high" ? [OVERLAY_W, OVERLAY_H] : [OVERLAY_W / 2, OVERLAY_H / 2];
+
 /** Gold selection wash only — no cascade / role fill. */
 export function paintAtlas(
   ctx: CanvasRenderingContext2D,
@@ -112,7 +139,7 @@ export function paintAtlas(
   ctx.fillStyle = "rgba(200,144,80,0.28)";
   ctx.fill();
   ctx.strokeStyle = "rgba(200,144,80,0.95)";
-  ctx.lineWidth = 1.8;
+  ctx.lineWidth = Math.max(1, (1.8 * w) / OVERLAY_W);
   ctx.stroke();
 }
 

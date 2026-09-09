@@ -527,12 +527,15 @@ function ViewsSection({
         </div>
       )}
       {compact && (
-        <div className="chip-row mb-2 flex gap-1 overflow-x-auto">
+        // A horizontal scroller put West Pacific under the right edge and the
+        // ISS ride past it entirely, with nothing to say more existed. Six
+        // views fit two columns without asking a thumb to discover a swipe.
+        <div className="mb-2 grid grid-cols-2 gap-1">
           {VIEWS.map((s) => (
             <button
               key={s.id}
               type="button"
-              className="press min-h-11 shrink-0 border border-etch px-3 font-mono text-2xs uppercase tracking-[0.12em] text-silk"
+              className="press min-h-11 border border-etch px-2 font-mono text-2xs uppercase tracking-[0.1em] text-silk"
               onClick={() => goView(s)}
             >
               {s.label}
@@ -606,6 +609,19 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
 
   const closeTray = () => {
     if (useAtlas.getState().panelOpen) useAtlas.getState().toggle("panelOpen");
+  };
+
+  /**
+   * Tap closes, and so does a real pull down. The previous handler ran both an
+   * `onClick` and a 48px swipe test, so every release closed the tray and the
+   * swipe branch decided nothing — including a pull *up*, which should hold.
+   */
+  const endDrag = (e: { clientY: number }) => {
+    const y0 = swipeY.current;
+    swipeY.current = null;
+    if (y0 == null) return;
+    const dy = e.clientY - y0;
+    if (dy > 44 || Math.abs(dy) < 6) closeTray();
   };
 
   return (
@@ -700,16 +716,21 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
           <button
             type="button"
             aria-label="Close toolbox"
-            className="tray-handle sticky top-0 z-10 flex w-full items-center justify-center bg-substrate py-2"
+            aria-controls="atlas-panel"
+            // 20px of grab bar was under every touch-target floor going; the
+            // row is the target now, the bar is just what you can see of it.
+            className="tray-handle sticky top-0 z-10 flex min-h-11 w-full items-center justify-center bg-substrate"
             onPointerDown={(e) => {
               swipeY.current = e.clientY;
+              e.currentTarget.setPointerCapture(e.pointerId);
             }}
-            onPointerUp={(e) => {
-              const y0 = swipeY.current;
+            onPointerUp={endDrag}
+            onPointerCancel={() => {
               swipeY.current = null;
-              if (y0 != null && e.clientY - y0 > 48) closeTray();
             }}
-            onClick={closeTray}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") closeTray();
+            }}
           >
             <span className="block h-1 w-10 bg-etch" />
           </button>
@@ -732,13 +753,14 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
           </section>
         )}
 
+        <ViewsSection countries={countries} names={names} compact={!fine} />
+        {/* Views first on a phone: the tray opens 279px tall, and a tide
+            readout is not what a thumb came for. */}
         {!fine && (
           <div className="border-b border-etch p-3">
             <TideGauge countries={countries} />
           </div>
         )}
-
-        <ViewsSection countries={countries} names={names} compact={!fine} />
         <ShellSection compact={!fine} />
         {fine ? <PointerSection /> : <TiltSection />}
       </aside>

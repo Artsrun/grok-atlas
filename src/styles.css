@@ -166,13 +166,6 @@ input[type="range"].inst::-moz-range-thumb {
   transform: none;
 }
 
-.chip-row {
-  scrollbar-width: none;
-}
-.chip-row::-webkit-scrollbar {
-  display: none;
-}
-
 .cupola-vignette {
   background: radial-gradient(
     ellipse 86% 82% at 50% 48%,

@@ -77,13 +77,19 @@ type AtlasState = {
   setIss: (iss: IssFix | null) => void;
   rideIss: (on: boolean) => void;
   calmMotion: () => void;
-  tickOrbits: () => void;
+  /** `dt` in seconds; no argument means tick now. */
+  tickOrbits: (dt?: number) => void;
 };
 
 const boot = skyAt();
 
 /** The cupola glass the ride borrows, handed back when the ride ends. */
 let cupolaBeforeRide = false;
+
+/** Seconds between ephemeris reads. 0.24° of sun travel — under the 0.04° set
+ * threshold's own noise once damping and the terminator's softness are in. */
+const SKY_TICK = 0.25;
+let sinceSky = SKY_TICK;
 
 export const useAtlas = create<AtlasState>((set, get) => ({
   names: [],
@@ -156,9 +162,14 @@ export const useAtlas = create<AtlasState>((set, get) => ({
     );
   },
   calmMotion: () => set({ autoSun: true, autoMoon: true, autoRotate: false }),
-  tickOrbits: () => {
+  tickOrbits: (dt = SKY_TICK) => {
     const s = get();
     if (!s.autoSun && !s.autoMoon) return;
+    // The sun moves 0.004° per frame. Reading the clock and running the
+    // ephemeris sixty times a second to find that out is the cost, not the set.
+    sinceSky += dt;
+    if (sinceSky < SKY_TICK) return;
+    sinceSky = 0;
     const e = skyAt();
     const patch: Partial<AtlasState> = {};
     if (
