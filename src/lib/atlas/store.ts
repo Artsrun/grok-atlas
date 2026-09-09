@@ -23,6 +23,7 @@ type LayerKey =
   | "showTides"
   | "cupola"
   | "panelOpen"
+  | "railOpen"
   | "tiltOn"
   | "autoSun"
   | "autoMoon"
@@ -53,7 +54,11 @@ type AtlasState = {
   showMoon: boolean;
   showTides: boolean;
   cupola: boolean;
+  /** Phone tray. Closed until a thumb asks for it. */
   panelOpen: boolean;
+  /** Desktop rail. Open by default — it is the instrument — but it covers a
+   * third of the window, so it has to be dismissible like the tray is. */
+  railOpen: boolean;
   tiltOn: boolean;
   focus: Focus | null;
   here: { lat: number; lon: number } | null;
@@ -116,6 +121,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   showTides: false,
   cupola: false,
   panelOpen: false,
+  railOpen: true,
   tiltOn: false,
   focus: focusOf(HOME),
   here: null,

@@ -10,7 +10,8 @@ Quiet edition is the default (the window). `?v=2` is the instrument.
 
 - **Orbit** — drag. Pinch / wheel to zoom. Touch gets a heavier throw and a larger tap slop so a drag does not pick a country.
 - **Phone** — three thumb buttons at the bottom: Locate, ISS ride, Toolbox. The instrument sheet is a short tray: tap the handle or pull it down to close, pull up and it stays. Views live in the tray as a two-column grid — six of them, none off the edge.
-- **Desktop** — right rail, hover tips, pointer section.
+- **Desktop** — right rail, hover tips, pointer section. The rail is 320px of opaque panel over a third of the globe, so it collapses: click the edge grab or press `T`, and the globe gets the whole window back. It scrolls, and fades its bottom edge only while there is more below.
+- **Keys** (desktop) — `T` toolbox, `L` locate, `I` ISS ride, `Esc` leave the ride, then close the toolbox. Nothing fires while a field has focus, so `find country` still takes an `i`.
 - **Country** — tap to inspect and fly to centroid
 - **Views** — Nile Delta, Yerevan, Ararat, Europe, Americas, West Pacific, Lunar stand, ISS ride
 - **ISS ride** — the camera takes the station: cupola glass, ground track running out ahead, live lat / lon / altitude / velocity under the caption. `ISS` on the dock, `iss ride` in the toolbox, `?site=iss` in a link. Any country tap or view leaves the ride and flies back out.

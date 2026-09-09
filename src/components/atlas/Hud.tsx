@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { centroidOf, type CountryFeat } from "@/lib/atlas/geo";
 import { focusForCountry } from "@/lib/atlas/fly";
 import { focusOf, HOME, RIDE_ID, VIEWS } from "@/lib/atlas/model";
@@ -9,6 +9,8 @@ import { springLabel, tideAt, tideMeters } from "@/lib/atlas/tide";
 import { deviceCaps } from "@/lib/atlas/device";
 import { frameStats } from "@/lib/atlas/perf";
 import { ThumbDock } from "./ThumbDock";
+import { useKeys } from "./use-keys";
+import { useLocate } from "./use-locate";
 
 /**
  * `tickOrbits` writes sunLon/moonLon every frame, so anything that subscribes
@@ -474,6 +476,20 @@ function PointerSection() {
         <li>click — pick country</li>
         <li>idle orbit — layer toggle</li>
       </ul>
+      <ul className="mt-2 space-y-1 border-t border-etch pt-2 font-mono text-2xs uppercase leading-5 tracking-wide text-dim">
+        <li>
+          <b className="text-ochre">t</b> — toolbox
+        </li>
+        <li>
+          <b className="text-ochre">l</b> — locate
+        </li>
+        <li>
+          <b className="text-ochre">i</b> — iss ride
+        </li>
+        <li>
+          <b className="text-ochre">esc</b> — leave ride · close
+        </li>
+      </ul>
       <div className="mt-3 font-mono text-2xs uppercase tracking-wide text-dimmer">
         overlay <Tag kind="x">declared</Tag> · textures <Tag kind="m">measured</Tag>
       </div>
@@ -603,13 +619,50 @@ function MobileDock() {
 export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet: () => void }) {
   const selected = useAtlas((s) => s.selected);
   const panelOpen = useAtlas((s) => s.panelOpen);
+  const railOpen = useAtlas((s) => s.railOpen);
   const fine = useFinePointer();
   const names = useMemo(() => countries.map((c) => c.name).sort(), [countries]);
   const swipeY = useRef<number | null>(null);
+  const locate = useLocate();
+  const open = fine ? railOpen : panelOpen;
+
+  /**
+   * The panel is a scroller — 1228px of instrument in a 580px rail — and it
+   * gave no sign of it: the shell sliders were cut mid-row with nothing to say
+   * more existed. `data-more` fades the bottom edge only while there is more,
+   * so it stops lying once you reach the end.
+   */
+  const panelRef = useRef<HTMLElement>(null);
+  const cueScroll = useCallback(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const more = el.scrollHeight - el.scrollTop - el.clientHeight > 4;
+    el.dataset.more = more ? "true" : "false";
+  }, []);
+  useEffect(cueScroll, [cueScroll, open, selected, fine]);
 
   const closeTray = () => {
     if (useAtlas.getState().panelOpen) useAtlas.getState().toggle("panelOpen");
   };
+
+  // The rail is the desktop's tray: the same three actions the thumb dock puts
+  // under a thumb, put under the fingers already on the keys.
+  useKeys(
+    {
+      t: () => useAtlas.getState().toggle("railOpen"),
+      l: () => void locate.run(),
+      i: () => {
+        const st = useAtlas.getState();
+        if (st.iss) st.rideIss(!st.issRide);
+      },
+      Escape: () => {
+        const st = useAtlas.getState();
+        if (st.issRide) st.rideIss(false);
+        else if (st.railOpen) st.toggle("railOpen");
+      },
+    },
+    fine,
+  );
 
   /**
    * Tap closes, and so does a real pull down. The previous handler ran both an
@@ -697,15 +750,42 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
 
       {!fine && <MobileDock />}
 
+      {fine && (
+        // The slot owns the position: `Tip` sets `position: relative`, so an
+        // absolutely placed button inside one anchors to the tip, not the HUD.
+        <div
+          className="rail-slot pointer-events-none absolute top-1/2 z-30 -translate-y-1/2"
+          style={{ right: railOpen ? "calc(0.5rem + min(320px, 100% - 1rem))" : "0.5rem" }}
+        >
+          <Tip text={railOpen ? "Collapse the toolbox · T" : "Open the toolbox · T"} end>
+            <button
+              type="button"
+              aria-expanded={railOpen}
+              aria-controls="atlas-panel"
+              aria-label={railOpen ? "Collapse the toolbox" : "Open the toolbox"}
+              // The tray got a handle so a thumb could dismiss it; the rail is
+              // 320px of opaque panel over a third of the globe with no way at
+              // all to put it away. Same affordance, turned on its side.
+              className="rail-grab press pointer-events-auto flex h-16 w-6 items-center justify-center border border-etch bg-substrate"
+              onClick={() => useAtlas.getState().toggle("railOpen")}
+            >
+              <span className="block h-8 w-1 bg-etch" />
+            </button>
+          </Tip>
+        </div>
+      )}
+
       <aside
         id="atlas-panel"
-        data-open={fine || panelOpen ? "true" : "false"}
-        aria-hidden={!fine && !panelOpen}
+        ref={panelRef}
+        data-open={open ? "true" : "false"}
+        aria-hidden={!open}
+        onScroll={cueScroll}
         className={`hud-scroll tray pointer-events-auto z-20 overflow-y-auto border border-etch bg-substrate ${
-          !fine && !panelOpen ? "invisible" : ""
+          open ? "" : "invisible"
         } ${
           fine
-            ? "absolute right-2 top-[88px] bottom-[52px] w-[min(320px,calc(100%-1rem))]"
+            ? "rail absolute right-2 top-[88px] bottom-[52px] w-[min(320px,calc(100%-1rem))]"
             : "absolute inset-x-2 max-h-[min(42dvh,420px)]"
         }`}
         style={

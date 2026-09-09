@@ -596,3 +596,16 @@ test("the sky tick is paced, and still lands", () => {
   st().tickOrbits(0.02);
   assert.notEqual(st().sunLon, parked, "and when the tick lands, the sun moves");
 });
+
+test("the two toolboxes have their own switch", () => {
+  const st = useAtlas.getState;
+  // The rail is the desktop instrument and opens with the app; the tray is a
+  // phone sheet and waits to be asked. One flag could not do both.
+  assert.equal(st().railOpen, true);
+  assert.equal(st().panelOpen, false);
+  st().toggle("railOpen");
+  assert.equal(st().railOpen, false, "the rail collapses");
+  assert.equal(st().panelOpen, false, "and does not drag the tray with it");
+  st().toggle("railOpen");
+  assert.equal(st().railOpen, true);
+});

@@ -165,6 +165,26 @@ input[type="range"].inst::-moz-range-thumb {
   opacity: 1;
   transform: none;
 }
+/* The rail leaves sideways — it is a drawer at the edge, not a sheet. */
+.rail[data-open="false"] {
+  transform: translateX(12px);
+}
+
+/* Only while there is more below: a permanent fade would be a lie at the end. */
+.tray[data-more="true"] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 34px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 34px), transparent);
+}
+
+.rail-slot {
+  transition: right 250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.rail-grab {
+  transition: border-color 150ms ease-out;
+}
+.rail-grab:hover {
+  border-color: var(--color-ochre);
+}
 
 .cupola-vignette {
   background: radial-gradient(

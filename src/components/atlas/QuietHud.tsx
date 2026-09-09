@@ -3,6 +3,7 @@ import { formatSolar, solarHours } from "@/lib/atlas/ephemeris";
 import { useFinePointer } from "@/lib/atlas/pointer";
 import { useAtlas } from "@/lib/atlas/store";
 import { ThumbDock } from "./ThumbDock";
+import { useKeys } from "./use-keys";
 import { useLocate } from "./use-locate";
 
 function Clock() {
@@ -29,6 +30,25 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
   const [hint, setHint] = useState(true);
   const fine = useFinePointer();
   const locate = useLocate();
+
+  // Same three actions the dock gives a thumb. The quiet edition has no rail
+  // to open, so `t` is the way through to the instrument.
+  useKeys(
+    {
+      l: () => void locate.run(),
+      i: () => {
+        const st = useAtlas.getState();
+        if (st.iss) st.rideIss(!st.issRide);
+      },
+      t: onInstrument,
+      Escape: () => {
+        const st = useAtlas.getState();
+        if (st.issRide) st.rideIss(false);
+        else if (st.selected) st.select(null);
+      },
+    },
+    fine,
+  );
 
   useEffect(() => {
     const id = setTimeout(() => setHint(false), 4000);
