@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DR, ll2xyz, xyz2ll } from "./geo.ts";
+import { DR, ll2xyz, ll2xyzInto, overlaySize, OVERLAY_W, OVERLAY_H, xyz2ll } from "./geo.ts";
 import type { CountryFeat } from "./geo.ts";
 import {
   boundsSpan,
@@ -40,6 +40,8 @@ import {
   groundTrack,
   trackHeading,
 } from "./orbit.ts";
+import { BOOT_STAGES, bootSnap, failBoot, markBoot, resetBoot } from "./boot.ts";
+import { useAtlas } from "./store.ts";
 
 type Bounds = CountryFeat["bounds"];
 
@@ -515,4 +517,95 @@ test("ground track samples the window it is asked for", () => {
   const pts = groundTrack(ISS_FIX, 900, 3600, 45);
   assert.equal(pts.length, Math.floor((900 + 3600) / 45) + 1);
   assert.ok(pts.every((p) => Math.abs(p.lat) <= ISS_INC + 1e-6 && Math.abs(p.lon) <= 180));
+});
+
+// ── staged boot ────────────────────────────────────────────────────────────
+
+test("boot starts dark and fills in order", () => {
+  resetBoot();
+  assert.equal(bootSnap().progress, 0);
+  assert.equal(bootSnap().lit, false);
+  assert.equal(bootSnap().ready, false);
+  markBoot("gl");
+  markBoot("day");
+  assert.equal(bootSnap().lit, true);
+  assert.equal(bootSnap().ready, false);
+  assert.equal(bootSnap().label, "day map");
+  markBoot("night");
+  assert.equal(bootSnap().ready, true);
+  assert.ok(bootSnap().progress > 0.4);
+  for (const s of BOOT_STAGES) markBoot(s);
+  assert.equal(bootSnap().progress, 1);
+  markBoot("day");
+  assert.equal(bootSnap().progress, 1, "repeat marks do not inflate");
+  resetBoot();
+  assert.equal(bootSnap().progress, 0);
+});
+
+test("a failed stage still completes, and leaves a reason", () => {
+  resetBoot();
+  markBoot("gl");
+  markBoot("day");
+  markBoot("night");
+  assert.equal(bootSnap().note, null);
+  failBoot("atlas", "countries offline · no borders, no country tap");
+  assert.ok(bootSnap().done.has("atlas"), "a dead stage must not hang the strip");
+  assert.match(bootSnap().note ?? "", /countries offline/);
+  resetBoot();
+  assert.equal(bootSnap().note, null, "reset clears the note with the stages");
+});
+
+// ── hot-path geometry ──────────────────────────────────────────────────────
+
+test("ll2xyzInto writes what ll2xyz returns", () => {
+  const out = { x: 0, y: 0, z: 0 };
+  for (const [lat, lon, r] of [
+    [0, 0, 1],
+    [40.177, 44.487, 1.02],
+    [-33.9, 151.2, 2.6],
+    [51.64, -179.9, 1.066],
+  ]) {
+    const [x, y, z] = ll2xyz(lat, lon, r);
+    const same = ll2xyzInto(out, lat, lon, r);
+    assert.equal(same, out, "writes in place, returns the same object");
+    near(out.x, x, 1e-12);
+    near(out.y, y, 1e-12);
+    near(out.z, z, 1e-12);
+  }
+});
+
+test("selection wash drops resolution below the top tier", () => {
+  assert.deepEqual(overlaySize("high"), [OVERLAY_W, OVERLAY_H]);
+  for (const tier of ["mid", "low"] as const) {
+    const [w, h] = overlaySize(tier);
+    assert.ok(w < OVERLAY_W && h < OVERLAY_H);
+    assert.equal(w / h, OVERLAY_W / OVERLAY_H, "equirectangular stays 2:1");
+  }
+});
+
+test("the sky tick is paced, and still lands", () => {
+  const st = useAtlas.getState;
+  st().setAutoSun(true);
+  // The first tick is free — a cold store has to catch up with the clock.
+  st().tickOrbits();
+  st().setSunLon(0);
+  const parked = st().sunLon;
+  // After that, frame-sized steps must not each pay for an ephemeris read.
+  for (let i = 0; i < 14; i++) st().tickOrbits(1 / 60);
+  assert.equal(st().sunLon, parked, "a quarter second of frames is one tick");
+  st().tickOrbits(0.02);
+  assert.notEqual(st().sunLon, parked, "and when the tick lands, the sun moves");
+});
+
+test("the two toolboxes have their own switch", () => {
+  const st = useAtlas.getState;
+  // The rail is the desktop instrument and opens with the app; the tray is a
+  // phone sheet and waits to be asked. One flag could not do both.
+  assert.equal(st().railOpen, true);
+  assert.equal(st().panelOpen, false);
+  st().toggle("railOpen");
+  assert.equal(st().railOpen, false, "the rail collapses");
+  assert.equal(st().panelOpen, false, "and does not drag the tray with it");
+  st().toggle("railOpen");
+  assert.equal(st().railOpen, true);
 });

@@ -1,35 +1,43 @@
 import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { markBoot } from "@/lib/atlas/boot";
 import { useAtlas } from "@/lib/atlas/store";
-import { ll2xyz } from "@/lib/atlas/geo";
+import { ll2xyzInto } from "@/lib/atlas/geo";
 import { moonXYZ } from "@/lib/atlas/tide";
 import { deviceCaps } from "@/lib/atlas/device";
 import { frameScale } from "@/lib/atlas/perf";
 import { ATMO_FRAG, ATMO_VERT, CLOUD_FRAG, CLOUD_VERT, EARTH_FRAG, EARTH_VERT } from "./shaders";
 
+/** Typed as the base Texture: these slots get a real map a moment later. */
+function pixel(r: number, g: number, b: number): THREE.Texture {
+  const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
+  t.needsUpdate = true;
+  return t;
+}
+
 export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
   const cap = deviceCaps();
-  const [dayMap, nightMap, specMap, normalMap, cloudMap] = useTexture([
-    "/earth/day.jpg",
-    "/earth/night.png",
-    "/earth/specular.jpg",
-    "/earth/normal.jpg",
-    "/earth/clouds.png",
-  ]);
+  const dayMap = useTexture("/earth/day.jpg");
+  const [cloudMap, setCloudMap] = useState<THREE.Texture | null>(null);
+
+  const placeholders = useMemo(
+    () => ({
+      night: pixel(0, 0, 0),
+      spec: pixel(8, 8, 8),
+      normal: pixel(128, 128, 255),
+    }),
+    [],
+  );
 
   useEffect(() => {
     dayMap.colorSpace = THREE.SRGBColorSpace;
-    nightMap.colorSpace = THREE.SRGBColorSpace;
     atlasTex.colorSpace = THREE.SRGBColorSpace;
     dayMap.anisotropy = cap.anisotropy;
-    nightMap.anisotropy = cap.anisotropy;
-    specMap.anisotropy = Math.min(4, cap.anisotropy);
-    normalMap.anisotropy = cap.anisotropy;
-    cloudMap.wrapS = THREE.RepeatWrapping;
     dayMap.needsUpdate = true;
-  }, [dayMap, nightMap, specMap, normalMap, cloudMap, atlasTex, cap.anisotropy]);
+    markBoot("day");
+  }, [dayMap, atlasTex, cap.anisotropy]);
 
   const geo = useMemo(() => {
     const g = new THREE.SphereGeometry(1, cap.sphereSeg[0], cap.sphereSeg[1]);
@@ -37,7 +45,27 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
     return g;
   }, [cap.sphereSeg]);
 
+  /**
+   * One sphere for both airglow shells. They differ by scale and a uniform, so
+   * two 64×48 geometries were two uploads and twice the vertex memory for the
+   * same 3k triangles. Phones get a coarser one — the shells are a soft fresnel
+   * wash, and nothing in them reads silhouette detail.
+   */
+  const atmoGeo = useMemo(() => {
+    const seg: [number, number] = cap.tier === "high" ? [64, 48] : [40, 28];
+    return new THREE.SphereGeometry(1, seg[0], seg[1]);
+  }, [cap.tier]);
+
   useEffect(() => () => geo.dispose(), [geo]);
+  useEffect(() => () => atmoGeo.dispose(), [atmoGeo]);
+  useEffect(
+    () => () => {
+      placeholders.night.dispose();
+      placeholders.spec.dispose();
+      placeholders.normal.dispose();
+    },
+    [placeholders],
+  );
 
   const earthMat = useRef<THREE.ShaderMaterial>(null);
   const atmoMat = useRef<THREE.ShaderMaterial>(null);
@@ -47,9 +75,9 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
   const uniforms = useMemo(
     () => ({
       uDay: { value: dayMap },
-      uNight: { value: nightMap },
-      uSpec: { value: specMap },
-      uNormal: { value: normalMap },
+      uNight: { value: placeholders.night },
+      uSpec: { value: placeholders.spec },
+      uNormal: { value: placeholders.normal },
       uAtlas: { value: atlasTex },
       uSun: { value: new THREE.Vector3(1, 0.2, 0) },
       uCamPos: { value: new THREE.Vector3(0, 0, 3) },
@@ -61,8 +89,68 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       uGrainLights: { value: cap.grainLights },
       uGrainRelief: { value: cap.grainRelief },
     }),
-    [dayMap, nightMap, specMap, normalMap, atlasTex],
+    [dayMap, placeholders, atlasTex, cap.grainLights, cap.grainRelief],
   );
+
+  useEffect(() => {
+    let dead = false;
+    const loader = new THREE.TextureLoader();
+    const held: THREE.Texture[] = [];
+
+    const take = async (url: string, srgb: boolean) => {
+      const t = await loader.loadAsync(url);
+      if (dead) {
+        t.dispose();
+        return null;
+      }
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = cap.anisotropy;
+      t.needsUpdate = true;
+      held.push(t);
+      return t;
+    };
+
+    (async () => {
+      const night = await take("/earth/night.png", true);
+      if (dead) return;
+      // Write through the uniforms object, not the material ref: the object is
+      // what the material holds, and it exists whether or not the mesh has
+      // mounted yet. A ref that is still null here loses the city lights for
+      // the rest of the session, and the boot strip leaves anyway.
+      if (night) uniforms.uNight.value = night;
+      markBoot("night");
+
+      if (cap.tier === "low") {
+        markBoot("maps");
+        markBoot("clouds");
+        return;
+      }
+
+      const spec = await take("/earth/specular.jpg", false);
+      const normal = await take("/earth/normal.jpg", false);
+      if (dead) return;
+      if (spec) uniforms.uSpec.value = spec;
+      if (normal) uniforms.uNormal.value = normal;
+      markBoot("maps");
+
+      const clouds = await take("/earth/clouds.png", true);
+      if (dead) return;
+      if (clouds) {
+        clouds.wrapS = THREE.RepeatWrapping;
+        setCloudMap(clouds);
+      }
+      markBoot("clouds");
+    })().catch(() => {
+      markBoot("night");
+      markBoot("maps");
+      markBoot("clouds");
+    });
+
+    return () => {
+      dead = true;
+      for (const t of held) t.dispose();
+    };
+  }, [cap.anisotropy, cap.tier, uniforms]);
 
   const atmoU = useMemo(
     () => ({
@@ -81,12 +169,15 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
     [],
   );
   const cloudU = useMemo(
-    () => ({
-      uClouds: { value: cloudMap },
-      uSun: { value: new THREE.Vector3(1, 0.2, 0) },
-      uOpacity: { value: 0.42 },
-      uTime: { value: 0 },
-    }),
+    () =>
+      cloudMap
+        ? {
+            uClouds: { value: cloudMap },
+            uSun: { value: new THREE.Vector3(1, 0.2, 0) },
+            uOpacity: { value: 0.42 },
+            uTime: { value: 0 },
+          }
+        : null,
     [cloudMap],
   );
 
@@ -101,8 +192,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
 
   useFrame(({ camera, clock }) => {
     const s = useAtlas.getState();
-    const xyz = ll2xyz(s.sunLat, s.sunLon, 1);
-    sunVec.set(xyz[0], xyz[1], xyz[2]);
+    ll2xyzInto(sunVec, s.sunLat, s.sunLon, 1);
     const m = moonXYZ(s.moonLon, 1, s.moonLat);
     moonVec.set(m[0], m[1], m[2]);
     const apply = (u: { uSun: { value: THREE.Vector3 }; uCamPos: { value: THREE.Vector3 } }) => {
@@ -116,7 +206,6 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       earthMat.current.uniforms.uBump.value = s.bump;
       earthMat.current.uniforms.uTideAmp.value = s.showTides ? s.tideGain : 0;
       earthMat.current.uniforms.uMoon.value.copy(moonVec);
-      // Grain is the first thing the governor takes and the first it gives back.
       const mix = s.grainMix * frameScale();
       earthMat.current.uniforms.uGrainLights.value = cap.grainLights * mix;
       earthMat.current.uniforms.uGrainRelief.value = cap.grainRelief * mix;
@@ -144,7 +233,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
           defines={defines}
         />
       </mesh>
-      {showClouds && (
+      {showClouds && cloudU && (
         <mesh geometry={geo} scale={1.008} renderOrder={2}>
           <shaderMaterial
             ref={cloudMat}
@@ -158,8 +247,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       )}
       {showAtmo && (
         <>
-          <mesh scale={1.04} renderOrder={3}>
-            <sphereGeometry args={[1, 64, 48]} />
+          <mesh geometry={atmoGeo} scale={1.04} renderOrder={3}>
             <shaderMaterial
               ref={atmoIn}
               vertexShader={ATMO_VERT}
@@ -171,8 +259,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
               blending={THREE.AdditiveBlending}
             />
           </mesh>
-          <mesh scale={1.08} renderOrder={0}>
-            <sphereGeometry args={[1, 64, 48]} />
+          <mesh geometry={atmoGeo} scale={1.08} renderOrder={0}>
             <shaderMaterial
               ref={atmoMat}
               vertexShader={ATMO_VERT}

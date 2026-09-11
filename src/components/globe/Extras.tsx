@@ -2,7 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { ll2xyz } from "@/lib/atlas/geo";
+import { ll2xyz, ll2xyzInto } from "@/lib/atlas/geo";
 import { LABEL_R, cageSegments, labelSpots } from "@/lib/atlas/graticule";
 import { groundTrack, trackHeading } from "@/lib/atlas/orbit";
 import { MOON_DIST, MOON_RADIUS, moonXYZ } from "@/lib/atlas/tide";
@@ -116,31 +116,45 @@ export function HerePin() {
   );
 }
 
-/** Orbit ahead and behind the current fix — one line, rebuilt per poll. */
+/** Orbit ahead and behind the current fix — one buffer, refilled per poll. */
 export function IssTrack() {
   const show = useAtlas((s) => s.showIss);
   const iss = useAtlas((s) => s.iss);
   const asc = useAtlas((s) => s.issAsc);
 
+  // A fix lands every 5 s and the sample count never changes, so the buffer is
+  // allocated once and rewritten — not a fresh geometry, and a fresh GPU
+  // buffer, a dozen times a minute.
   const geo = useMemo(() => {
-    if (!iss) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(TRACK_N * 3), 3));
+    g.setDrawRange(0, 0);
+    return g;
+  }, []);
+  useEffect(() => () => geo.dispose(), [geo]);
+
+  useEffect(() => {
+    if (!iss) {
+      geo.setDrawRange(0, 0);
+      return;
+    }
     const r = 1 + Math.max(0.04, iss.alt / 6371);
     const pts = groundTrack({ lat: iss.lat, lon: iss.lon, ascending: asc });
-    const p = new Float32Array(pts.length * 3);
-    pts.forEach((s, i) => {
-      const v = ll2xyz(s.lat, s.lon, r);
-      p[i * 3] = v[0];
-      p[i * 3 + 1] = v[1];
-      p[i * 3 + 2] = v[2];
-    });
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(p, 3));
-    return g;
-  }, [iss, asc]);
+    const attr = geo.getAttribute("position") as THREE.BufferAttribute;
+    const arr = attr.array as Float32Array;
+    const n = Math.min(pts.length, TRACK_N);
+    for (let i = 0; i < n; i++) {
+      ll2xyzInto(TMP, pts[i].lat, pts[i].lon, r);
+      arr[i * 3] = TMP.x;
+      arr[i * 3 + 1] = TMP.y;
+      arr[i * 3 + 2] = TMP.z;
+    }
+    attr.needsUpdate = true;
+    geo.setDrawRange(0, n);
+    geo.computeBoundingSphere();
+  }, [geo, iss, asc]);
 
-  useEffect(() => () => geo?.dispose(), [geo]);
-
-  if (!show || !geo) return null;
+  if (!show || !iss) return null;
   return (
     <line>
       <primitive object={geo} attach="geometry" />
@@ -154,36 +168,40 @@ const FWD = new THREE.Vector3();
 const SIDE = new THREE.Vector3();
 const AHEAD = new THREE.Vector3();
 const BASIS = new THREE.Matrix4();
+const TMP = new THREE.Vector3();
+/** Samples in `groundTrack`'s default window — the buffer is sized once. */
+const TRACK_N = 101;
 
 export function Station() {
   const show = useAtlas((s) => s.showIss);
   // On the ride the camera is inside it — the pin would be a wall.
   const ride = useAtlas((s) => s.issRide);
-  const ref = useRef<THREE.Group>(null);
+  const iss = useAtlas((s) => s.iss);
+  const asc = useAtlas((s) => s.issAsc);
 
-  useFrame(() => {
-    const s = useAtlas.getState();
-    const iss = s.iss;
-    if (!ref.current || !iss) return;
+  /**
+   * Pose is a function of the fix, and a fix lands every 5 s — so solve it on
+   * arrival rather than sixty times a second. The frame loop was running a
+   * ten-trig heading solve and allocating two arrays to land on the same pose.
+   */
+  const pose = useMemo(() => {
+    if (!iss) return null;
     const r = 1 + Math.max(0.04, iss.alt / 6371);
-    const p = ll2xyz(iss.lat, iss.lon, r);
-    ref.current.position.set(p[0], p[1], p[2]);
+    const pos = ll2xyzInto(new THREE.Vector3(), iss.lat, iss.lon, r);
     // Nose along the track, panels across it — not a box pointed at the core.
-    const head =
-      (trackHeading({ lat: iss.lat, lon: iss.lon, ascending: s.issAsc }) * Math.PI) / 180;
-    const a = ll2xyz(iss.lat + Math.cos(head) * 0.6, iss.lon + Math.sin(head) * 0.6, r);
-    AHEAD.set(a[0], a[1], a[2]);
-    UP.copy(ref.current.position).normalize();
-    FWD.copy(AHEAD).sub(ref.current.position).normalize();
+    const head = (trackHeading({ lat: iss.lat, lon: iss.lon, ascending: asc }) * Math.PI) / 180;
+    ll2xyzInto(AHEAD, iss.lat + Math.cos(head) * 0.6, iss.lon + Math.sin(head) * 0.6, r);
+    UP.copy(pos).normalize();
+    FWD.copy(AHEAD).sub(pos).normalize();
     SIDE.crossVectors(UP, FWD).normalize();
     FWD.crossVectors(SIDE, UP).normalize();
     BASIS.makeBasis(SIDE, UP, FWD);
-    ref.current.quaternion.setFromRotationMatrix(BASIS);
-  });
+    return { pos, quat: new THREE.Quaternion().setFromRotationMatrix(BASIS) };
+  }, [iss, asc]);
 
-  if (!show || ride) return null;
+  if (!show || ride || !pose) return null;
   return (
-    <group ref={ref}>
+    <group position={pose.pos} quaternion={pose.quat}>
       <mesh>
         <boxGeometry args={[0.018, 0.009, 0.028]} />
         <meshBasicMaterial color="#d4c5a3" />
@@ -205,7 +223,6 @@ export function Luna() {
   const map = useTexture("/earth/moon.jpg");
   const group = useRef<THREE.Group>(null);
   const mat = useRef<THREE.ShaderMaterial>(null);
-  const sunVec = useMemo(() => new THREE.Vector3(), []);
 
   const uniforms = useMemo(
     () => ({
@@ -220,9 +237,9 @@ export function Luna() {
     const s = useAtlas.getState();
     const p = moonXYZ(s.moonLon, MOON_DIST, s.moonLat);
     if (group.current) group.current.position.set(p[0], p[1], p[2]);
-    const sun = ll2xyz(s.sunLat, s.sunLon, 1);
-    sunVec.set(sun[0], sun[1], sun[2]);
-    if (mat.current) mat.current.uniforms.uSun.value.copy(sunVec);
+    if (mat.current) {
+      ll2xyzInto(mat.current.uniforms.uSun.value as THREE.Vector3, s.sunLat, s.sunLon, 1);
+    }
   });
 
   if (!show) return null;
@@ -246,12 +263,12 @@ export function SunLight() {
   const disc = useRef<THREE.Mesh>(null);
   useFrame(() => {
     const s = useAtlas.getState();
-    const v = ll2xyz(s.sunLat, s.sunLon, 40);
+    ll2xyzInto(TMP, s.sunLat, s.sunLon, 40);
     if (light.current) {
-      light.current.position.set(v[0], v[1], v[2]);
+      light.current.position.copy(TMP);
       light.current.target.position.set(0, 0, 0);
     }
-    if (disc.current) disc.current.position.set(v[0], v[1], v[2]);
+    if (disc.current) disc.current.position.copy(TMP);
   });
   return (
     <>
