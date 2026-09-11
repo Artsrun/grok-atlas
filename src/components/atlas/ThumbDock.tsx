@@ -1,6 +1,5 @@
-import { useState } from "react";
-import { pinHere } from "@/lib/atlas/locate";
 import { useAtlas } from "@/lib/atlas/store";
+import { useLocate } from "./use-locate";
 
 /**
  * Three equal thumb-zone actions. Quiet edition and the instrument share this
@@ -11,10 +10,9 @@ export function ThumbDock({
 }: {
   third: { label: string; pressed?: boolean; onClick: () => void; hint: string };
 }) {
-  const here = useAtlas((s) => s.here);
   const iss = useAtlas((s) => s.iss);
   const ride = useAtlas((s) => s.issRide);
-  const [busy, setBusy] = useState(false);
+  const locate = useLocate();
 
   return (
     <div
@@ -23,33 +21,38 @@ export function ThumbDock({
     >
       <button
         type="button"
-        className="press min-h-12 border border-etch bg-substrate font-mono text-2xs uppercase tracking-[0.14em] text-silk"
-        disabled={busy}
-        aria-label="Pin this device and fly here"
-        onClick={async () => {
-          setBusy(true);
-          try {
-            await pinHere(true);
-          } catch {
-            /* denied */
-          }
-          setBusy(false);
-        }}
+        className={`press min-h-12 border bg-substrate font-mono text-2xs uppercase tracking-[0.14em] ${
+          locate.state === "denied" ? "border-rust text-rust" : "border-etch text-silk"
+        }`}
+        disabled={locate.busy}
+        aria-label={
+          locate.state === "denied" ? "Location permission refused" : "Pin this device and fly here"
+        }
+        onClick={locate.run}
       >
-        {here ? "Here" : busy ? "…" : "Locate"}
+        {locate.label}
       </button>
       <button
         type="button"
+        // A toggle, so it reports as one — the label alone flips between two
+        // words and tells a screen reader nothing about which state it is in.
+        aria-pressed={ride}
+        // Enabled before the first fix would ride to a station with no
+        // coordinates, so it waits, and says that rather than going grey.
+        disabled={!iss}
+        aria-label={
+          ride ? "Leave the station" : iss ? "Ride the station" : "Waiting for the station feed"
+        }
         className={`press min-h-12 border font-mono text-2xs uppercase tracking-[0.14em] ${
           ride
             ? "border-ochre bg-substrate-2 text-ochre"
-            : "border-etch bg-substrate text-silk"
+            : iss
+              ? "border-etch bg-substrate text-silk"
+              : "border-etch bg-substrate text-dimmer"
         }`}
-        disabled={!iss}
-        aria-label={ride ? "Leave the station" : "Ride the station"}
         onClick={() => iss && useAtlas.getState().rideIss(!ride)}
       >
-        {ride ? "Leave" : iss ? "ISS" : "ISS …"}
+        {ride ? "leave" : "iss"}
       </button>
       <button
         type="button"

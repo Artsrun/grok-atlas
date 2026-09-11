@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { CountryFeat } from "@/lib/atlas/geo";
 import { loadCountries } from "@/lib/atlas/geo";
-import { markBoot, warmEarth } from "@/lib/atlas/boot";
+import { failBoot, markBoot } from "@/lib/atlas/boot";
 import { focusForCountry } from "@/lib/atlas/fly";
 import { hashAt, installHashSync } from "@/lib/atlas/hash";
 import { pinHere, pollIss } from "@/lib/atlas/locate";
 import { focusOf, RIDE_ID, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { GlobeCanvas } from "@/components/globe/GlobeCanvas";
-import { BootStrip } from "./BootScreen";
+import { BootNote, BootStrip } from "./BootScreen";
 import { Hud } from "./Hud";
 import { QuietHud } from "./QuietHud";
 
@@ -21,11 +21,8 @@ export function AtlasApp() {
   const [countries, setCountries] = useState<CountryFeat[]>([]);
   const [edition, setEdition] = useState<Edition>(editionFromUrl);
   const cupola = useAtlas((s) => s.cupola);
+  // Read during render, before the rig can write one of its own.
   const bootHash = useRef(hashAt());
-
-  useEffect(() => {
-    warmEarth();
-  }, []);
 
   useEffect(() => {
     let live = true;
@@ -38,6 +35,8 @@ export function AtlasApp() {
         const p = new URLSearchParams(location.search);
         const site = p.get("site");
         const country = p.get("c");
+        // A query view is deliberate and outranks the hash; the hash outranks
+        // auto-locate, and the canvas already opened on it — so don't fly away.
         if (site === "here") {
           pinHere(true).catch(() => {});
         } else if (site === RIDE_ID) {
@@ -56,7 +55,9 @@ export function AtlasApp() {
         }
       })
       .catch(() => {
-        if (live) markBoot("atlas");
+        // The globe is not gated on the topology, so this is a missing layer,
+        // not a dead app: say which capabilities went with it and carry on.
+        if (live) failBoot("atlas", "countries offline · no borders, no country tap");
       });
     return () => {
       live = false;
@@ -64,6 +65,8 @@ export function AtlasApp() {
   }, []);
 
   useEffect(() => {
+    // The hash names a camera, not a place — so clear the caption rather than
+    // leave HOME's label sitting over wherever the URL actually points.
     const at = bootHash.current;
     if (at) useAtlas.setState({ focus: { ...at } });
     return installHashSync();
@@ -115,6 +118,7 @@ export function AtlasApp() {
         </>
       ) : null}
       <BootStrip />
+      <BootNote />
       <div className="pointer-events-none absolute inset-0 z-20">
         {edition === "2" ? (
           <Hud countries={countries} onQuiet={() => setEdition("3")} />

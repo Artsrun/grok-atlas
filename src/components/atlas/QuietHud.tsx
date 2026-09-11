@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { formatSolar, solarHours } from "@/lib/atlas/ephemeris";
-import { pinHere } from "@/lib/atlas/locate";
 import { useFinePointer } from "@/lib/atlas/pointer";
 import { useAtlas } from "@/lib/atlas/store";
 import { ThumbDock } from "./ThumbDock";
+import { useKeys } from "./use-keys";
+import { useLocate } from "./use-locate";
 
 function Clock() {
   const [t, setT] = useState("—");
@@ -23,13 +24,31 @@ function Clock() {
 export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
   const selected = useAtlas((s) => s.selected);
   const focus = useAtlas((s) => s.focus);
-  const here = useAtlas((s) => s.here);
   const iss = useAtlas((s) => s.iss);
   const ride = useAtlas((s) => s.issRide);
   const caption = ride ? "ISS" : (selected ?? focus?.label ?? "");
   const [hint, setHint] = useState(true);
-  const [busy, setBusy] = useState(false);
   const fine = useFinePointer();
+  const locate = useLocate();
+
+  // Same three actions the dock gives a thumb. The quiet edition has no rail
+  // to open, so `t` is the way through to the instrument.
+  useKeys(
+    {
+      l: () => void locate.run(),
+      i: () => {
+        const st = useAtlas.getState();
+        if (st.iss) st.rideIss(!st.issRide);
+      },
+      t: onInstrument,
+      Escape: () => {
+        const st = useAtlas.getState();
+        if (st.issRide) st.rideIss(false);
+        else if (st.selected) st.select(null);
+      },
+    },
+    fine,
+  );
 
   useEffect(() => {
     const id = setTimeout(() => setHint(false), 4000);
@@ -70,24 +89,23 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
           <>
             <button
               type="button"
-              className="tip press pointer-events-auto min-h-11 px-1 font-mono text-2xs uppercase tracking-[0.16em] text-ochre"
-              data-tip="Pin this device and fly here"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await pinHere(true);
-                } catch {
-                  /* denied */
-                }
-                setBusy(false);
-              }}
+              className={`tip press pointer-events-auto min-h-11 px-1 font-mono text-2xs uppercase tracking-[0.16em] ${
+                locate.state === "denied" ? "text-rust" : "text-ochre"
+              }`}
+              data-tip={
+                locate.state === "denied"
+                  ? "Location permission refused"
+                  : "Pin this device and fly here"
+              }
+              disabled={locate.busy}
+              onClick={locate.run}
             >
-              {here ? "HERE" : busy ? "…" : "LOCATE"}
+              {locate.label}
             </button>
             {iss ? (
               <button
                 type="button"
+                aria-pressed={ride}
                 className={`tip press pointer-events-auto min-h-11 px-1 font-mono text-2xs uppercase tracking-[0.16em] ${
                   ride ? "text-ochre" : "text-dimmer"
                 }`}
@@ -126,7 +144,7 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
       {!fine && (
         <ThumbDock
           third={{
-            label: "Atlas",
+            label: "Toolbox",
             hint: "Open the instrument toolbox",
             onClick: onInstrument,
           }}
