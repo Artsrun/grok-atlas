@@ -19,6 +19,8 @@ type LayerKey =
   | "showBorders"
   | "showCage"
   | "showIss"
+  | "showRadio"
+  | "showCosmic"
   | "showMoon"
   | "showTides"
   | "cupola"
@@ -48,6 +50,10 @@ type AtlasState = {
   showBorders: boolean;
   showCage: boolean;
   showIss: boolean;
+  showRadio: boolean;
+  showCosmic: boolean;
+  /** Planetary Kp 0–9. Drives cosmic rate. Fail-open 2. */
+  kp: number;
   /** Camera parked on the station, not orbiting the globe. */
   issRide: boolean;
   showMoon: boolean;
@@ -75,6 +81,7 @@ type AtlasState = {
   flyTo: (f: Focus) => void;
   setHere: (here: { lat: number; lon: number } | null) => void;
   setIss: (iss: IssFix | null) => void;
+  setKp: (kp: number) => void;
   rideIss: (on: boolean) => void;
   calmMotion: () => void;
   tickOrbits: () => void;
@@ -105,6 +112,9 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   showBorders: true,
   showCage: false,
   showIss: true,
+  showRadio: false,
+  showCosmic: false,
+  kp: 2,
   issRide: false,
   showMoon: true,
   showTides: false,
@@ -139,6 +149,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
     const issAsc = iss && prev && iss.lat !== prev.lat ? iss.lat > prev.lat : get().issAsc;
     set({ iss, issAsc });
   },
+  setKp: (kp) => set({ kp }),
   /** The ride is a frame, not a place — cupola glass comes with it. */
   rideIss: (on) => {
     if (on) {

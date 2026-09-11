@@ -1,3 +1,4 @@
+import { kpFromRows } from "./radio.ts";
 import { useAtlas } from "./store.ts";
 
 export async function requestHere(): Promise<{ lat: number; lon: number }> {
@@ -35,4 +36,10 @@ export async function pollIss() {
     alt: d.altitude,
     vel: d.velocity / 3600,
   });
+}
+
+export async function pollSpaceWx() {
+  const res = await fetch("https://services.swpc.noaa.gov/json/planetary_k_index_1m.json");
+  if (!res.ok) throw new Error("swpc kp");
+  useAtlas.getState().setKp(kpFromRows(await res.json()));
 }

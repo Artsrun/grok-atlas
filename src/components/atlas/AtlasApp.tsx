@@ -3,7 +3,8 @@ import type { CountryFeat } from "@/lib/atlas/geo";
 import { loadCountries } from "@/lib/atlas/geo";
 import { focusForCountry } from "@/lib/atlas/fly";
 import { hashAt, installHashSync } from "@/lib/atlas/hash";
-import { pinHere, pollIss } from "@/lib/atlas/locate";
+import { deviceCaps } from "@/lib/atlas/device";
+import { pinHere, pollIss, pollSpaceWx } from "@/lib/atlas/locate";
 import { focusOf, RIDE_ID, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { GlobeCanvas } from "@/components/globe/GlobeCanvas";
@@ -70,9 +71,19 @@ export function AtlasApp() {
   }, []);
 
   useEffect(() => {
+    const cap = deviceCaps();
+    useAtlas.setState({
+      showRadio: cap.tier !== "low",
+      showCosmic: cap.tier === "high",
+    });
     pollIss().catch(() => {});
+    pollSpaceWx().catch(() => {});
     const id = setInterval(() => pollIss().catch(() => {}), 5000);
-    return () => clearInterval(id);
+    const wx = setInterval(() => pollSpaceWx().catch(() => {}), 60_000);
+    return () => {
+      clearInterval(id);
+      clearInterval(wx);
+    };
   }, []);
 
   useEffect(() => {
