@@ -23,6 +23,15 @@ export function elongation(moonLon: number, sunLon: number): number {
   return d;
 }
 
+/**
+ * Fraction of the moon's disc lit, 0 at new and 1 at full. What the night side
+ * actually gets to see by, so the moonlight wash follows the phase instead of
+ * shining a full moon through a new one.
+ */
+export function moonLit(moonLon: number, sunLon: number): number {
+  return (1 - Math.cos((elongation(moonLon, sunLon) * Math.PI) / 180)) / 2;
+}
+
 export function springFactor(moonLon: number, sunLon: number): number {
   return Math.abs(Math.cos((elongation(moonLon, sunLon) * Math.PI) / 180));
 }

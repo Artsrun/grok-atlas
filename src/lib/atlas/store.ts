@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { requestFly } from "./camera.ts";
+import type { Clock } from "./clock.ts";
+import { advance, clockMs, LIVE, nudge, skyTick, toggleHold } from "./clock.ts";
 import { skyAt } from "./ephemeris.ts";
 import { focusOf, HOME } from "./model.ts";
 
@@ -27,19 +29,22 @@ type LayerKey =
   | "panelOpen"
   | "railOpen"
   | "tiltOn"
-  | "autoSun"
-  | "autoMoon"
   | "autoRotate";
 
 type AtlasState = {
   names: string[];
   selected: string | null;
+  /** Sky positions are derived from `clock` — read them, never set them. */
   sunLon: number;
   sunLat: number;
   moonLon: number;
   moonLat: number;
-  autoSun: boolean;
-  autoMoon: boolean;
+  /** The instant the globe is showing, as a gap from the real clock. */
+  clock: Clock;
+  /** Virtual epoch ms, republished each tick so the HUD can read it cheaply. */
+  clockAt: number;
+  /** The rate a pause came from, so play resumes where it left off. */
+  resumeRate: number;
   autoRotate: boolean;
   nightGain: number;
   bump: number;
@@ -73,10 +78,15 @@ type AtlasState = {
   issAsc: boolean;
   setNames: (n: string[]) => void;
   select: (name: string | null) => void;
-  setSunLon: (v: number) => void;
-  setMoonLon: (v: number) => void;
-  setAutoSun: (v: boolean) => void;
-  setAutoMoon: (v: boolean) => void;
+  setRate: (rate: number) => void;
+  /** Play/pause. Resumes at whatever rate it was holding from. */
+  holdClock: () => void;
+  /** Scrub by hand, in ms. The rate keeps running underneath. */
+  scrub: (ms: number) => void;
+  /** Back to the real sky. */
+  goLive: () => void;
+  /** Jump to an instant, for a share link. */
+  setClockAt: (offset: number) => void;
   setNightGain: (v: number) => void;
   setBump: (v: number) => void;
   setCloudOpacity: (v: number) => void;
@@ -93,7 +103,8 @@ type AtlasState = {
   tickOrbits: (dt?: number) => void;
 };
 
-const boot = skyAt();
+const bootAt = Date.now();
+const boot = skyAt(new Date(bootAt));
 
 /** The cupola glass the ride borrows, handed back when the ride ends. */
 let cupolaBeforeRide = false;
@@ -110,8 +121,9 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   sunLat: boot.sunLat,
   moonLon: boot.moonLon,
   moonLat: boot.moonLat,
-  autoSun: true,
-  autoMoon: true,
+  clock: LIVE,
+  clockAt: bootAt,
+  resumeRate: 1,
   autoRotate: false,
   nightGain: 1.65,
   bump: 1.05,
@@ -139,10 +151,26 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   issAsc: true,
   setNames: (names) => set({ names }),
   select: (selected) => set({ selected }),
-  setSunLon: (sunLon) => set({ sunLon }),
-  setMoonLon: (moonLon) => set({ moonLon }),
-  setAutoSun: (autoSun) => set({ autoSun }),
-  setAutoMoon: (autoMoon) => set({ autoMoon }),
+  setRate: (rate) => {
+    set({ clock: { ...get().clock, rate }, resumeRate: rate === 0 ? get().resumeRate : rate });
+    get().tickOrbits();
+  },
+  holdClock: () => {
+    set({ clock: toggleHold(get().clock, get().resumeRate) });
+    get().tickOrbits();
+  },
+  scrub: (ms) => {
+    set({ clock: nudge(get().clock, ms) });
+    get().tickOrbits();
+  },
+  goLive: () => {
+    set({ clock: LIVE, resumeRate: 1 });
+    get().tickOrbits();
+  },
+  setClockAt: (offset) => {
+    set({ clock: { offset, rate: 0 } });
+    get().tickOrbits();
+  },
   setNightGain: (nightGain) => set({ nightGain }),
   setBump: (bump) => set({ bump }),
   setCloudOpacity: (cloudOpacity) => set({ cloudOpacity }),
@@ -178,31 +206,32 @@ export const useAtlas = create<AtlasState>((set, get) => ({
       iss ? { lat: iss.lat, lon: iss.lon, label: "ISS", dist: 2.6, site: "iss" } : focusOf(HOME),
     );
   },
-  calmMotion: () => set({ autoSun: true, autoMoon: true, autoRotate: false }),
+  calmMotion: () => set({ clock: LIVE, autoRotate: false }),
   tickOrbits: (dt = SKY_TICK) => {
     const s = get();
-    if (!s.autoSun && !s.autoMoon) return;
-    // The sun moves 0.004° per frame. Reading the clock and running the
-    // ephemeris sixty times a second to find that out is the cost, not the set.
+    const moved = s.clock.rate !== 1;
+    const clock = moved ? advance(s.clock, dt) : s.clock;
+    // Live, the sun moves 0.004° per frame and reading the clock to find that
+    // out costs more than the set does. Running, every frame is animation and
+    // a stale sun steps visibly across the terminator.
     sinceSky += dt;
-    if (sinceSky < SKY_TICK) return;
+    if (sinceSky < skyTick(clock.rate, SKY_TICK)) {
+      if (moved) set({ clock });
+      return;
+    }
     sinceSky = 0;
-    const e = skyAt();
-    const patch: Partial<AtlasState> = {};
-    if (
-      s.autoSun &&
-      (Math.abs(s.sunLon - e.sunLon) > 0.04 || Math.abs(s.sunLat - e.sunLat) > 0.04)
-    ) {
+    const at = clockMs(clock, Date.now());
+    const e = skyAt(new Date(at));
+    const patch: Partial<AtlasState> = { clockAt: at };
+    if (moved) patch.clock = clock;
+    if (Math.abs(s.sunLon - e.sunLon) > 0.04 || Math.abs(s.sunLat - e.sunLat) > 0.04) {
       patch.sunLon = e.sunLon;
       patch.sunLat = e.sunLat;
     }
-    if (
-      s.autoMoon &&
-      (Math.abs(s.moonLon - e.moonLon) > 0.04 || Math.abs(s.moonLat - e.moonLat) > 0.04)
-    ) {
+    if (Math.abs(s.moonLon - e.moonLon) > 0.04 || Math.abs(s.moonLat - e.moonLat) > 0.04) {
       patch.moonLon = e.moonLon;
       patch.moonLat = e.moonLat;
     }
-    if (Object.keys(patch).length) set(patch);
+    set(patch);
   },
 }));

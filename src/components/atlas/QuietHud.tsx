@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatOffset, formatRate, isLive } from "@/lib/atlas/clock";
 import { formatSolar, solarHours } from "@/lib/atlas/ephemeris";
 import { useFinePointer } from "@/lib/atlas/pointer";
 import { useAtlas } from "@/lib/atlas/store";
@@ -6,19 +7,43 @@ import { ThumbDock } from "./ThumbDock";
 import { useKeys } from "./use-keys";
 import { useLocate } from "./use-locate";
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * The clock is the time tool in the quiet edition: it reads the instant the
+ * globe is actually showing, goes gold the moment that stops being now, and
+ * is the way back. A quiet window with a lying clock would be worse than no
+ * clock at all.
+ */
 function Clock() {
-  const [t, setT] = useState("—");
+  // Minutes, so a clock that only prints minutes does not re-render per frame.
+  const at = useAtlas((s) => Math.floor(s.clockAt / 60000));
+  const clock = useAtlas((s) => s.clock);
+  const live = isLive(clock);
+  const [, tick] = useState(0);
+
+  // Live, the store only republishes when the sky moves; the minute still has
+  // to turn on the readout.
   useEffect(() => {
-    const tick = () => {
-      const d = new Date();
-      const p = (n: number) => String(n).padStart(2, "0");
-      setT(`${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
+    const id = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, []);
-  return <span className="font-mono text-xs tabular-nums text-dimmer">{t} UTC</span>;
+
+  const d = new Date(live ? Date.now() : at * 60000);
+  const label = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+
+  if (live) return <span className="font-mono text-xs tabular-nums text-dimmer">{label}</span>;
+  return (
+    <button
+      type="button"
+      onClick={() => useAtlas.getState().goLive()}
+      className="tip press pointer-events-auto font-mono text-xs tabular-nums text-ochre"
+      data-tip="Back to the real sky · N"
+      aria-label={`Showing ${label}, ${formatOffset(clock.offset)}. Back to the real sky.`}
+    >
+      {label} · {clock.rate === 0 ? formatOffset(clock.offset) : formatRate(clock.rate)}
+    </button>
+  );
 }
 
 export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
@@ -28,6 +53,7 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
   const ride = useAtlas((s) => s.issRide);
   const caption = ride ? "ISS" : (selected ?? focus?.label ?? "");
   const [hint, setHint] = useState(true);
+  const atMinute = useAtlas((s) => Math.floor(s.clockAt / 60000));
   const fine = useFinePointer();
   const locate = useLocate();
 
@@ -41,6 +67,10 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
         if (st.iss) st.rideIss(!st.issRide);
       },
       t: onInstrument,
+      " ": () => useAtlas.getState().holdClock(),
+      n: () => useAtlas.getState().goLive(),
+      ",": () => useAtlas.getState().scrub(-3600_000),
+      ".": () => useAtlas.getState().scrub(3600_000),
       Escape: () => {
         const st = useAtlas.getState();
         if (st.issRide) st.rideIss(false);
@@ -58,7 +88,12 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
     if (caption) setHint(false);
   }, [caption]);
 
-  const solar = focus && Number.isFinite(focus.lon) ? formatSolar(solarHours(focus.lon)) : null;
+  // Solar time follows the clock the globe is showing. Reading the wall clock
+  // here put a dawn caption under a midnight globe.
+  const solar =
+    focus && Number.isFinite(focus.lon)
+      ? formatSolar(solarHours(focus.lon, new Date(atMinute * 60000)))
+      : null;
   const sub =
     ride && iss
       ? `${iss.lat.toFixed(1)}° ${iss.lon.toFixed(1)}° · ${Math.round(iss.alt)} km · ${iss.vel.toFixed(2)} km/s`
