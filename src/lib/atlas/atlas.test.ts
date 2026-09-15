@@ -42,6 +42,21 @@ import {
 } from "./orbit.ts";
 import { BOOT_STAGES, bootSnap, failBoot, markBoot, resetBoot } from "./boot.ts";
 import { useAtlas } from "./store.ts";
+import {
+  advance,
+  clockMs,
+  formatOffset,
+  formatRate,
+  isLive,
+  LIVE,
+  MAX_OFFSET,
+  nudge,
+  offsetFromParam,
+  setRate,
+  skyTick,
+  stampParam,
+  toggleHold,
+} from "./clock.ts";
 
 type Bounds = CountryFeat["bounds"];
 
@@ -583,18 +598,22 @@ test("selection wash drops resolution below the top tier", () => {
   }
 });
 
-test("the sky tick is paced, and still lands", () => {
+test("the sky tick is paced while live, and free while running", () => {
   const st = useAtlas.getState;
-  st().setAutoSun(true);
-  // The first tick is free — a cold store has to catch up with the clock.
+  st().goLive();
   st().tickOrbits();
-  st().setSunLon(0);
   const parked = st().sunLon;
-  // After that, frame-sized steps must not each pay for an ephemeris read.
+  // Live, frame-sized steps must not each pay for an ephemeris read.
   for (let i = 0; i < 14; i++) st().tickOrbits(1 / 60);
   assert.equal(st().sunLon, parked, "a quarter second of frames is one tick");
   st().tickOrbits(0.02);
-  assert.notEqual(st().sunLon, parked, "and when the tick lands, the sun moves");
+  // A live sun moves 0.004° a tick, under the 0.04° set threshold, so what is
+  // proven here is the pacing; the running case below proves it lands.
+  st().setRate(3600);
+  const before = st().sunLon;
+  st().tickOrbits(1 / 60);
+  assert.notEqual(st().sunLon, before, "running, every frame is a frame of sky");
+  st().goLive();
 });
 
 test("the two toolboxes have their own switch", () => {
@@ -608,4 +627,79 @@ test("the two toolboxes have their own switch", () => {
   assert.equal(st().panelOpen, false, "and does not drag the tray with it");
   st().toggle("railOpen");
   assert.equal(st().railOpen, true);
+});
+
+// ── the clock ──────────────────────────────────────────────────────────────
+
+test("live rides the real clock and costs nothing to hold there", () => {
+  assert.ok(isLive(LIVE));
+  const after = advance(LIVE, 10);
+  assert.equal(after, LIVE, "rate 1 never touches the offset");
+  assert.equal(clockMs(LIVE, 1_000), 1_000);
+});
+
+test("a held clock falls behind exactly as fast as time passes", () => {
+  const held = setRate(LIVE, 0);
+  const t0 = 1_000_000;
+  const c = advance(held, 5);
+  // Five real seconds later the virtual instant is the same instant.
+  assert.equal(clockMs(c, t0 + 5000), t0);
+  assert.ok(!isLive(c));
+});
+
+test("rate is the gap's speed, forwards and back", () => {
+  const fast = advance(setRate(LIVE, 60), 1);
+  assert.equal(fast.offset, 59_000, "one real second buys a virtual minute");
+  const back = advance(setRate(LIVE, -60), 1);
+  assert.equal(back.offset, -61_000, "reverse also gives up the second it spent");
+});
+
+test("the clock cannot run off into the next century", () => {
+  const c = advance(setRate(LIVE, 86400 * 400), 86400);
+  assert.equal(c.offset, MAX_OFFSET);
+  assert.equal(nudge({ offset: MAX_OFFSET, rate: 0 }, 86400_000).offset, MAX_OFFSET);
+  assert.equal(nudge({ offset: -MAX_OFFSET, rate: 0 }, -86400_000).offset, -MAX_OFFSET);
+});
+
+test("hold and resume keep the rate that was running", () => {
+  const running = setRate(LIVE, 3600);
+  const held = toggleHold(running, running.rate);
+  assert.equal(held.rate, 0);
+  assert.equal(toggleHold(held, 3600).rate, 3600, "play resumes where it paused");
+});
+
+test("scrubbing moves the instant and leaves the rate alone", () => {
+  const running = setRate(LIVE, 60);
+  const scrubbed = nudge(running, 3600_000);
+  assert.equal(scrubbed.rate, 60);
+  assert.equal(scrubbed.offset, 3600_000);
+});
+
+test("the ephemeris pacing follows the rate", () => {
+  assert.ok(skyTick(1) > 0, "live can be lazy");
+  assert.ok(skyTick(0) > 0, "so can a held sky");
+  assert.equal(skyTick(60), 0, "a running sky is animation");
+  assert.equal(skyTick(-3600), 0);
+});
+
+test("the readouts say what the clock is doing", () => {
+  assert.equal(formatRate(0), "hold");
+  assert.equal(formatRate(1), "live");
+  assert.equal(formatRate(60), "1 min/s");
+  assert.equal(formatRate(3600), "1 h/s");
+  assert.equal(formatRate(43200), "12 h/s");
+  assert.equal(formatRate(-3600), "−1 h/s");
+  assert.equal(formatOffset(0), "now");
+  assert.equal(formatOffset(90 * 60_000), "+1h 30m");
+  assert.equal(formatOffset(-(26 * 3600_000)), "−1d 02h");
+  assert.equal(formatOffset(-5 * 60_000), "−5m");
+});
+
+test("a shared instant survives the round trip", () => {
+  const real = Date.UTC(2026, 8, 15, 8, 0);
+  const at = real + 5 * 3600_000;
+  const back = offsetFromParam(stampParam(at), real);
+  assert.equal(back, 5 * 3600_000);
+  assert.equal(offsetFromParam("not a time", real), null);
+  assert.equal(offsetFromParam(stampParam(real + MAX_OFFSET * 4), real), MAX_OFFSET, "clamped");
 });

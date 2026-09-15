@@ -41,6 +41,10 @@ uniform sampler2D uSpec;
 uniform sampler2D uNormal;
 uniform sampler2D uAtlas;
 uniform vec3 uSun;
+/** Shared with the vertex stage, which uses it for the tide bulge. */
+uniform vec3 uMoon;
+/** Illuminated fraction of the disc, 0 new to 1 full. */
+uniform float uMoonLit;
 uniform vec3 uCamPos;
 uniform float uAtlasMix;
 uniform float uNightGain;
@@ -81,8 +85,9 @@ float grain2(vec2 uv) {
 }
 
 void main() {
-  vec3 nTex = texture2D(uNormal, vUv).xyz * 2.0 - 1.0;
-  nTex.xy *= uBump;
+  vec3 nMap = texture2D(uNormal, vUv).xyz * 2.0 - 1.0;
+  nMap.xy *= uBump;
+  vec3 nTex = nMap;
   if (uGrainRelief > 0.001) {
     float rx = grain2(vUv * 420.0);
     float ry = grain2(vUv.yx * 310.0 + 8.1);
@@ -90,23 +95,69 @@ void main() {
   }
   mat3 tbn = mat3(normalize(vTangent), normalize(vBitangent), normalize(vNormal));
   vec3 N = normalize(tbn * nTex);
+  /**
+   * The sun glint reads off the relief alone. Grain belongs in the diffuse,
+   * where it is film; in a 48-power highlight it is a field of white static
+   * scattered across half an ocean.
+   */
+  vec3 Nspec = normalize(tbn * nMap);
   vec3 V = normalize(uCamPos - vPos);
   vec3 L = normalize(uSun);
   vec3 H = normalize(L + V);
 
   float ndl = dot(N, L);
-  float dayStrength = smoothstep(-0.25, 0.50, ndl);
+  /**
+   * The terminator rides the geometric normal, never the bumped one. Relief —
+   * and the heavy grain injected into it — was chewing the day/night line into
+   * speckle and making the city lights flicker on ridges that are a normal map,
+   * not a horizon.
+   */
+  vec3 gN = normalize(vNormal);
+  float geo = dot(gN, L);
+  // Wide enough to read as twilight, tighter than the old ramp, which had to
+  // double as the lamp timer and so smeared the line to cover for it.
+  float dayStrength = smoothstep(-0.20, 0.42, geo);
+  /** Solar elevation, degrees. Close enough at this scale for a lamp timer. */
+  float sunEl = degrees(asin(clamp(geo, -1.0, 1.0)));
+  /**
+   * Lamps come up through civil twilight and are full by nautical dark, rather
+   * than cross-fading against daylight — a city is not half-lit at noon.
+   */
+  float lampOn = 1.0 - smoothstep(-8.0, 2.0, sunEl);
 
   vec3 dayC = texture2D(uDay, vUv).rgb;
   vec3 nightC = texture2D(uNight, vUv).rgb;
   float lum = max(nightC.r, max(nightC.g, nightC.b));
-  vec3 lights = nightC * mix(1.6, 4.8, lum) * uNightGain;
+  /** Sodium on the outskirts, arclight and LED in the cores. */
+  vec3 sodium = vec3(1.00, 0.72, 0.36);
+  vec3 arclight = vec3(0.86, 0.91, 1.00);
+  /**
+   * The night map carries a dim blue-grey base across all land — sensor floor
+   * and albedo, not lamps — and multiplying it by the gain washed the Sahara
+   * violet. Lamps start where that floor ends.
+   */
+  float lamps = smoothstep(0.03, 0.14, lum);
+  vec3 lights = nightC * mix(sodium, arclight, smoothstep(0.30, 0.90, lum));
+  lights *= mix(1.6, 4.8, lum) * uNightGain * lamps;
+#if NIGHT_BLOOM > 0
+  // Four taps of the lights themselves, spread a couple of texels: the haze a
+  // city throws into its own air. Cheaper than a bloom pass and it only ever
+  // glows where there is something to glow.
+  vec2 halo = vec2(2.5 / 2048.0, 2.5 / 1024.0);
+  float ring =
+    texture2D(uNight, vUv + vec2(halo.x, 0.0)).g +
+    texture2D(uNight, vUv - vec2(halo.x, 0.0)).g +
+    texture2D(uNight, vUv + vec2(0.0, halo.y)).g +
+    texture2D(uNight, vUv - vec2(0.0, halo.y)).g;
+  lights += sodium * ring * 0.16 * uNightGain * lamps;
+#endif
   if (uGrainLights > 0.001) {
     float glt = grain2(vUv * 780.0);
     lights *= 1.0 + (glt - 0.42) * uGrainLights * 1.65;
-    float spark = smoothstep(0.74, 1.0, glt) * lum;
+    float spark = smoothstep(0.74, 1.0, glt) * lum * lamps;
     lights += vec3(1.0, 0.78, 0.42) * spark * uGrainLights * 0.62;
   }
+  lights *= lampOn;
 
   float specMask = texture2D(uSpec, vUv).r;
   vec3 lit = dayC * (0.12 + 0.88 * max(ndl, 0.0));
@@ -115,9 +166,18 @@ void main() {
     float rg = grain2(vUv * 190.0);
     lit *= 1.0 + (rg - 0.5) * uGrainRelief * 0.18 * land;
   }
-  vec3 color = mix(lights, lit, dayStrength);
+  // Additive, not a cross-fade: at dusk the ground is still lit and the lamps
+  // are already on, which is the half hour the old mix could not show.
+  vec3 color = lit * dayStrength + lights;
+  /**
+   * Moonlight. A full moon puts a quarter-lux on the night side and the ISS
+   * photographs it — cloud tops and deserts come back as blue-grey. The moon
+   * vector is already here for the tide, so this costs one dot.
+   */
+  float moonEl = max(dot(gN, normalize(uMoon)), 0.0);
+  color += dayC * vec3(0.72, 0.80, 1.00) * moonEl * moonEl * uMoonLit * 0.022 * lampOn;
 
-  float spec = pow(max(dot(N, H), 0.0), 48.0) * specMask * dayStrength;
+  float spec = pow(max(dot(Nspec, H), 0.0), 48.0) * specMask * dayStrength;
   color += vec3(0.78, 0.88, 1.0) * spec * 0.65;
 
   vec3 atmoDay = vec3(0.302, 0.698, 1.0);

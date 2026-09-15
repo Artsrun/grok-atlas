@@ -1,6 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { centroidOf, type CountryFeat } from "@/lib/atlas/geo";
 import { focusForCountry } from "@/lib/atlas/fly";
+import {
+  formatOffset,
+  formatRate,
+  formatStamp,
+  isLive,
+  RATES,
+  stampParam,
+} from "@/lib/atlas/clock";
 import { focusOf, HOME, RIDE_ID, VIEWS } from "@/lib/atlas/model";
 import type { View } from "@/lib/atlas/model";
 import { useFinePointer } from "@/lib/atlas/pointer";
@@ -64,8 +72,6 @@ type ToggleId =
   | "showMoon"
   | "showTides"
   | "cupola"
-  | "autoSun"
-  | "autoMoon"
   | "autoRotate";
 
 const LAYER_TIPS: Record<ToggleId, string> = {
@@ -77,8 +83,6 @@ const LAYER_TIPS: Record<ToggleId, string> = {
   showMoon: "Phase disc, declared range.",
   showTides: "P2 lunar + 0.46 solar bulge.",
   cupola: "Window vignette. ISS frame.",
-  autoSun: "Clock-true terminator.",
-  autoMoon: "Clock-true moon longitude.",
   autoRotate: "Idle orbit. Stops on drag.",
 };
 
@@ -101,11 +105,17 @@ function LayerToggle({ id, label }: { id: ToggleId; label: string }) {
   );
 }
 
+/**
+ * The header clock reads the instant on the globe, not the one on the wall —
+ * a header that says 12:00 over a midnight Earth is a bug with a nice font.
+ */
 function Clock({ compact }: { compact?: boolean }) {
   const [t, setT] = useState("—");
+  const at = useAtlas((s) => s.clockAt);
+  const seconds = useAtlas((s) => isLive(s.clock));
   useEffect(() => {
     const tick = () => {
-      const d = new Date();
+      const d = new Date(seconds ? Date.now() : useAtlas.getState().clockAt);
       const p = (n: number) => String(n).padStart(2, "0");
       setT(
         compact
@@ -116,7 +126,7 @@ function Clock({ compact }: { compact?: boolean }) {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [compact]);
+  }, [compact, seconds, at]);
   return (
     <span className="font-mono text-xs font-medium tabular-nums text-ochre">
       <time dateTime={t}>{t}</time>
@@ -262,13 +272,187 @@ function RideToggle() {
   );
 }
 
+/** Scrub range on the slider: half a day either side of wherever you are. */
+const SCRUB_SPAN = 12 * 3600_000;
+
+/** Thumb-sized jumps, for a tray with no room for eight rates. */
+const JUMPS = [
+  { ms: -86400_000, label: "−1 d", hint: "Jump back one day" },
+  { ms: -3600_000, label: "−1 h", hint: "Jump back one hour" },
+  { ms: 3600_000, label: "+1 h", hint: "Jump forward one hour" },
+  { ms: 86400_000, label: "+1 d", hint: "Jump forward one day" },
+] as const;
+
+function RateButton({ rate, active }: { rate: number; active: boolean }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      aria-label={`Run time at ${formatRate(rate)}`}
+      onClick={() => useAtlas.getState().setRate(rate)}
+      className={`press min-h-9 border px-1 font-mono text-2xs uppercase tracking-[0.08em] transition-colors duration-150 ${
+        active
+          ? "border-ochre bg-substrate-2 text-ochre"
+          : "border-etch text-dimmer hover:text-silk"
+      }`}
+    >
+      {formatRate(rate)}
+    </button>
+  );
+}
+
+/**
+ * The time machine. Everything in the sky is a function of one instant, so
+ * this is the only control that should be moving it — the two longitude
+ * sliders this replaces dragged the sun and the moon apart from each other and
+ * from the clock, and called the result a view.
+ */
+function TimeSection({ compact }: { compact: boolean }) {
+  const clock = useAtlas((s) => s.clock);
+  // Whole minutes: the stamp only ever shows minutes, and this subscribes to a
+  // value the rig rewrites every frame while the clock is running.
+  const at = useAtlas((s) => Math.floor(s.clockAt / 60000) * 60000);
+  const live = isLive(clock);
+  const st = useAtlas.getState;
+  const scrubRef = useRef<HTMLInputElement>(null);
+  const lastScrub = useRef(0);
+  const endScrub = () => {
+    lastScrub.current = 0;
+    if (scrubRef.current) scrubRef.current.value = "0";
+  };
+
+  return (
+    <section className="border-b border-etch p-3">
+      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+        <span className="text-ochre">§01</span>
+        <span className="font-semibold tracking-[0.2em]">Time</span>
+        <span className="text-dimmer">FIG.1</span>
+      </div>
+
+      <div className="flex items-baseline justify-between">
+        <span className={`font-mono text-sm tabular-nums ${live ? "text-dim" : "text-ochre"}`}>
+          {formatStamp(at)}
+        </span>
+        <span className="font-mono text-2xs uppercase tracking-[0.14em] text-dimmer">
+          {formatOffset(clock.offset)}
+        </span>
+      </div>
+
+      <label
+        htmlFor="atlas-scrub"
+        className="mt-3 block font-mono text-2xs uppercase tracking-[0.14em] text-dimmer"
+      >
+        Scrub ±12 h
+      </label>
+      <input
+        id="atlas-scrub"
+        ref={scrubRef}
+        className="inst"
+        type="range"
+        min={-SCRUB_SPAN}
+        max={SCRUB_SPAN}
+        step={60_000}
+        /**
+         * A jog wheel, not a position: it reports the distance since the last
+         * event and recentres on release, so one drag to +6 h moves the clock
+         * six hours however far out it already is. Pinned at zero it would
+         * re-apply its whole excursion on every event of the same drag.
+         */
+        defaultValue={0}
+        aria-label="Scrub time, twelve hours either way"
+        onChange={(e) => {
+          const v = +e.target.value;
+          st().scrub(v - lastScrub.current);
+          lastScrub.current = v;
+        }}
+        onPointerUp={endScrub}
+        onPointerCancel={endScrub}
+        onKeyUp={endScrub}
+        onBlur={endScrub}
+      />
+
+      <div className="mt-2 grid grid-cols-2 gap-1">
+        <Tip text="Hold the sky where it is · Space">
+          <button
+            type="button"
+            aria-pressed={clock.rate === 0}
+            aria-label={clock.rate === 0 ? "Resume time" : "Hold time"}
+            onClick={() => st().holdClock()}
+            className={`press min-h-11 w-full border font-mono text-2xs uppercase tracking-[0.12em] ${
+              clock.rate === 0
+                ? "border-ochre bg-substrate-2 text-ochre"
+                : "border-etch text-silk hover:text-silk"
+            }`}
+          >
+            {clock.rate === 0 ? "resume" : "hold"}
+          </button>
+        </Tip>
+        <Tip text="Back to the real sky · N" end>
+          <button
+            type="button"
+            disabled={live}
+            aria-label="Return to the real sky"
+            onClick={() => st().goLive()}
+            className={`press min-h-11 w-full border font-mono text-2xs uppercase tracking-[0.12em] ${
+              live ? "border-etch text-dimmer" : "border-ochre text-ochre"
+            }`}
+          >
+            now
+          </button>
+        </Tip>
+      </div>
+
+      <div className="mt-1 grid grid-cols-4 gap-1">
+        {RATES.filter((r) => r > 0).map((r) => (
+          <RateButton key={r} rate={r} active={clock.rate === r} />
+        ))}
+      </div>
+      {/* A phone gets jumps, which a thumb can aim; reverse rates stay on the
+          rail, where there is room for eight buttons and a mouse to pick one. */}
+      <div className="mt-1 grid grid-cols-4 gap-1">
+        {compact
+          ? JUMPS.map((j) => (
+              <button
+                key={j.ms}
+                type="button"
+                aria-label={j.hint}
+                onClick={() => st().scrub(j.ms)}
+                className="press min-h-9 w-full border border-etch font-mono text-2xs uppercase tracking-[0.08em] text-dimmer"
+              >
+                {j.label}
+              </button>
+            ))
+          : RATES.filter((r) => r > 1).map((r) => (
+              <RateButton key={-r} rate={-r} active={clock.rate === -r} />
+            ))}
+        {!compact && (
+          <Tip text="Jump back a day" end>
+            <button
+              type="button"
+              aria-label="Jump back one day"
+              onClick={() => st().scrub(-86400_000)}
+              className="press min-h-9 w-full border border-etch font-mono text-2xs uppercase tracking-[0.08em] text-dimmer hover:text-silk"
+            >
+              −1 d
+            </button>
+          </Tip>
+        )}
+      </div>
+
+      {!compact && (
+        <p className="mt-1 font-mono text-2xs uppercase leading-5 tracking-wide text-dimmer">
+          one clock · terminator, phase, station
+        </p>
+      )}
+    </section>
+  );
+}
+
 function ShellSection({ compact }: { compact: boolean }) {
   const nightGain = useAtlas((s) => s.nightGain);
   const bump = useAtlas((s) => s.bump);
   const tideGain = useAtlas((s) => s.tideGain);
   const grainMix = useAtlas((s) => s.grainMix);
-  const sun = useSunDeg();
-  const moon = useMoonDeg();
   const st = useAtlas.getState;
   const cap = deviceCaps();
 
@@ -291,30 +475,6 @@ function ShellSection({ compact }: { compact: boolean }) {
         value={Math.round(bump * 100)}
         onChange={(v) => st().setBump(v / 100)}
         format={(v) => `×${(v / 100).toFixed(2)}`}
-      />
-      <Slider
-        label="Subsolar longitude"
-        tip="Sun longitude. Turns off sun drift."
-        min={0}
-        max={359}
-        value={sun % 360}
-        onChange={(v) => {
-          st().setAutoSun(false);
-          st().setSunLon(v);
-        }}
-        format={(v) => `${v}°`}
-      />
-      <Slider
-        label="Moon longitude"
-        tip="Moon along the equator. Turns off moon drift."
-        min={0}
-        max={359}
-        value={(moon + 360) % 360}
-        onChange={(v) => {
-          st().setAutoMoon(false);
-          st().setMoonLon(v);
-        }}
-        format={(v) => `${v}°`}
       />
       <Slider
         label="Tide gain"
@@ -343,7 +503,7 @@ function ShellSection({ compact }: { compact: boolean }) {
   return (
     <section className="border-b border-etch p-3">
       <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-        <span className="text-ochre">§03</span>
+        <span className="text-ochre">§04</span>
         <span className="font-semibold tracking-[0.2em]">Shell</span>
         <span className="text-dimmer">FIG.4</span>
       </div>
@@ -367,8 +527,6 @@ function ShellSection({ compact }: { compact: boolean }) {
         <LayerToggle id="showCage" label="cage" />
         <RideToggle />
         <LayerToggle id="cupola" label="cupola" />
-        <LayerToggle id="autoSun" label="sun drift" />
-        <LayerToggle id="autoMoon" label="moon drift" />
         <LayerToggle id="autoRotate" label="orbit" />
       </div>
     </section>
@@ -409,7 +567,7 @@ function TiltSection() {
   return (
     <section className="p-3">
       <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-        <span className="text-ochre">§04</span>
+        <span className="text-ochre">§05</span>
         <span className="font-semibold tracking-[0.2em]">Device tilt</span>
         <span className="text-dimmer">FIG.5</span>
       </div>
@@ -466,7 +624,7 @@ function PointerSection() {
   return (
     <section className="p-3">
       <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-        <span className="text-ochre">§04</span>
+        <span className="text-ochre">§05</span>
         <span className="font-semibold tracking-[0.2em]">Pointer</span>
         <span className="text-dimmer">FIG.5</span>
       </div>
@@ -485,6 +643,15 @@ function PointerSection() {
         </li>
         <li>
           <b className="text-ochre">i</b> — iss ride
+        </li>
+        <li>
+          <b className="text-ochre">space</b> — hold time
+        </li>
+        <li>
+          <b className="text-ochre">, .</b> — scrub ∓1 h
+        </li>
+        <li>
+          <b className="text-ochre">n</b> — back to now
         </li>
         <li>
           <b className="text-ochre">esc</b> — leave ride · close
@@ -522,7 +689,7 @@ function ViewsSection({
   return (
     <section className="border-b border-etch p-3">
       <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-        <span className="text-ochre">§02</span>
+        <span className="text-ochre">§03</span>
         <span className="font-semibold tracking-[0.2em]">Views</span>
         <span className="text-dimmer">FIG.3</span>
       </div>
@@ -586,6 +753,10 @@ function ViewsSection({
           // The ride is the view: a country under it is not what you'd share.
           if (selected && !ride) p.set("c", selected);
           else if (site) p.set("site", site);
+          // A view is a place and an instant. Sharing the place without the
+          // sky that made it worth sharing loses half of it.
+          const clock = useAtlas.getState();
+          if (!isLive(clock.clock)) p.set("t", stampParam(clock.clockAt));
           const url = `${location.origin}${location.pathname}${p.toString() ? `?${p}` : ""}`;
           try {
             await navigator.clipboard?.writeText(url);
@@ -650,6 +821,10 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
   useKeys(
     {
       t: () => useAtlas.getState().toggle("railOpen"),
+      " ": () => useAtlas.getState().holdClock(),
+      n: () => useAtlas.getState().goLive(),
+      ",": () => useAtlas.getState().scrub(-3600_000),
+      ".": () => useAtlas.getState().scrub(3600_000),
       l: () => void locate.run(),
       i: () => {
         const st = useAtlas.getState();
@@ -786,7 +961,7 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
         } ${
           fine
             ? "rail absolute right-2 top-[88px] bottom-[52px] w-[min(320px,calc(100%-1rem))]"
-            : "absolute inset-x-2 max-h-[min(42dvh,420px)]"
+            : "absolute inset-x-2 max-h-[min(48dvh,460px)]"
         }`}
         style={
           fine ? undefined : { bottom: "calc(max(0.5rem, env(safe-area-inset-bottom)) + 4.25rem)" }
@@ -818,7 +993,7 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
         {selected && (
           <section className="border-b border-etch p-3">
             <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-              <span className="text-ochre">§01</span>
+              <span className="text-ochre">§02</span>
               <span className="font-semibold tracking-[0.2em]">Selected</span>
               <span className="text-dimmer">FIG.2</span>
             </div>
@@ -833,6 +1008,7 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
           </section>
         )}
 
+        <TimeSection compact={!fine} />
         <ViewsSection countries={countries} names={names} compact={!fine} />
         {/* Views first on a phone: the tray opens 279px tall, and a tide
             readout is not what a thumb came for. */}

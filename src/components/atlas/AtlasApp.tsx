@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CountryFeat } from "@/lib/atlas/geo";
 import { loadCountries } from "@/lib/atlas/geo";
 import { failBoot, markBoot } from "@/lib/atlas/boot";
+import { offsetFromParam } from "@/lib/atlas/clock";
 import { focusForCountry } from "@/lib/atlas/fly";
 import { hashAt, installHashSync } from "@/lib/atlas/hash";
 import { deviceCaps } from "@/lib/atlas/device";
@@ -36,6 +37,13 @@ export function AtlasApp() {
         const p = new URLSearchParams(location.search);
         const site = p.get("site");
         const country = p.get("c");
+        // `?t=` is orthogonal to where the camera goes: a shared instant holds
+        // whatever view the rest of the link asks for.
+        const at = p.get("t");
+        if (at) {
+          const offset = offsetFromParam(at, Date.now());
+          if (offset !== null) useAtlas.getState().setClockAt(offset);
+        }
         // A query view is deliberate and outranks the hash; the hash outranks
         // auto-locate, and the canvas already opened on it — so don't fly away.
         if (site === "here") {

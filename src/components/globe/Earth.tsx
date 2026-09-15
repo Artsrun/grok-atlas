@@ -5,10 +5,13 @@ import * as THREE from "three";
 import { markBoot } from "@/lib/atlas/boot";
 import { useAtlas } from "@/lib/atlas/store";
 import { ll2xyzInto } from "@/lib/atlas/geo";
-import { moonXYZ } from "@/lib/atlas/tide";
+import { moonLit, moonXYZ } from "@/lib/atlas/tide";
 import { deviceCaps } from "@/lib/atlas/device";
 import { frameScale } from "@/lib/atlas/perf";
 import { ATMO_FRAG, ATMO_VERT, CLOUD_FRAG, CLOUD_VERT, EARTH_FRAG, EARTH_VERT } from "./shaders";
+
+/** Uniform slots the staged loader fills after the first frame. */
+type MapSlot = "uNight" | "uSpec" | "uNormal";
 
 /** Typed as the base Texture: these slots get a real map a moment later. */
 function pixel(r: number, g: number, b: number): THREE.Texture {
@@ -21,6 +24,13 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
   const cap = deviceCaps();
   const dayMap = useTexture("/earth/day.jpg");
   const [cloudMap, setCloudMap] = useState<THREE.Texture | null>(null);
+  /**
+   * Staged maps, held in state rather than written straight at a uniform.
+   * The material does not share the object this component memoises — r3f
+   * copies it on the way in — so a write to the memo lands nowhere, which is
+   * exactly how the city lights went out and stayed out.
+   */
+  const [maps, setMaps] = useState<Partial<Record<MapSlot, THREE.Texture>>>({});
 
   const placeholders = useMemo(
     () => ({
@@ -86,6 +96,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       uNightGain: { value: 1.65 },
       uBump: { value: 1.05 },
       uTideAmp: { value: 0 },
+      uMoonLit: { value: 1 },
       uGrainLights: { value: cap.grainLights },
       uGrainRelief: { value: cap.grainRelief },
     }),
@@ -112,12 +123,16 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
 
     (async () => {
       const night = await take("/earth/night.png", true);
+      if (night) {
+        // The halo samples it off-centre and the limb sees it at a grazing
+        // angle: without mips and anisotropy that is aliasing, not a city.
+        night.generateMipmaps = true;
+        night.minFilter = THREE.LinearMipmapLinearFilter;
+        night.magFilter = THREE.LinearFilter;
+        night.needsUpdate = true;
+      }
       if (dead) return;
-      // Write through the uniforms object, not the material ref: the object is
-      // what the material holds, and it exists whether or not the mesh has
-      // mounted yet. A ref that is still null here loses the city lights for
-      // the rest of the session, and the boot strip leaves anyway.
-      if (night) uniforms.uNight.value = night;
+      if (night) setMaps((m) => ({ ...m, uNight: night }));
       markBoot("night");
 
       if (cap.tier === "low") {
@@ -129,8 +144,11 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       const spec = await take("/earth/specular.jpg", false);
       const normal = await take("/earth/normal.jpg", false);
       if (dead) return;
-      if (spec) uniforms.uSpec.value = spec;
-      if (normal) uniforms.uNormal.value = normal;
+      setMaps((m) => ({
+        ...m,
+        ...(spec ? { uSpec: spec } : null),
+        ...(normal ? { uNormal: normal } : null),
+      }));
       markBoot("maps");
 
       const clouds = await take("/earth/clouds.png", true);
@@ -151,6 +169,18 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       for (const t of held) t.dispose();
     };
   }, [cap.anisotropy, cap.tier, uniforms]);
+
+  useEffect(() => {
+    const live = earthMat.current?.uniforms;
+    for (const key of Object.keys(maps) as MapSlot[]) {
+      const tex = maps[key];
+      if (!tex) continue;
+      // The memo, so a material built after this still gets it; the material,
+      // because that is the copy the GPU is actually reading.
+      uniforms[key].value = tex;
+      if (live?.[key]) live[key].value = tex;
+    }
+  }, [maps, uniforms]);
 
   const atmoU = useMemo(
     () => ({
@@ -186,7 +216,12 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
 
   /** Octaves are linked, not branched — the tier picks the shader it can run. */
   const defines = useMemo(
-    () => ({ GRAIN_OCTAVES: cap.tier === "high" ? 3 : cap.tier === "mid" ? 2 : 1 }),
+    () => ({
+      GRAIN_OCTAVES: cap.tier === "high" ? 3 : cap.tier === "mid" ? 2 : 1,
+      // Four extra texture fetches per fragment for the city haze. The compat
+      // path does not link them at all.
+      NIGHT_BLOOM: cap.tier === "low" ? 0 : 1,
+    }),
     [cap.tier],
   );
 
@@ -206,6 +241,7 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
       earthMat.current.uniforms.uBump.value = s.bump;
       earthMat.current.uniforms.uTideAmp.value = s.showTides ? s.tideGain : 0;
       earthMat.current.uniforms.uMoon.value.copy(moonVec);
+      earthMat.current.uniforms.uMoonLit.value = moonLit(s.moonLon, s.sunLon);
       const mix = s.grainMix * frameScale();
       earthMat.current.uniforms.uGrainLights.value = cap.grainLights * mix;
       earthMat.current.uniforms.uGrainRelief.value = cap.grainRelief * mix;
