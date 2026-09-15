@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { DR, ll2xyz, ll2xyzInto, overlaySize, OVERLAY_W, OVERLAY_H, xyz2ll } from "./geo.ts";
 import type { CountryFeat } from "./geo.ts";
@@ -42,6 +43,8 @@ import {
 } from "./orbit.ts";
 import { BOOT_STAGES, bootSnap, failBoot, markBoot, resetBoot } from "./boot.ts";
 import { useAtlas } from "./store.ts";
+import { factLine, formatArea, formatPop, type FactBook } from "./facts.ts";
+import { CAPITAL_STORIES, storyFor } from "./stories.ts";
 import {
   advance,
   clockMs,
@@ -702,4 +705,90 @@ test("a shared instant survives the round trip", () => {
   assert.equal(back, 5 * 3600_000);
   assert.equal(offsetFromParam("not a time", real), null);
   assert.equal(offsetFromParam(stampParam(real + MAX_OFFSET * 4), real), MAX_OFFSET, "clamped");
+});
+
+// ── countries, capitals and rivers ─────────────────────────────────────────
+
+const facts = JSON.parse(readFileSync("public/geo/country-facts.json", "utf8")) as FactBook;
+const topo = JSON.parse(readFileSync("public/geo/countries-110m.json", "utf8")) as {
+  objects: { countries: { geometries: { properties?: { name?: string } }[] } };
+};
+const rivers = JSON.parse(readFileSync("public/geo/rivers.json", "utf8")) as {
+  rivers: { name: string; coords: [number, number][] }[];
+};
+
+test("every country on the map has a fact sheet", () => {
+  const names = topo.objects.countries.geometries
+    .map((g) => g.properties?.name)
+    .filter((n): n is string => Boolean(n));
+  const missing = names.filter((n) => !facts[n]);
+  assert.deepEqual(missing, [], "a clickable country with nothing to say is a dead end");
+});
+
+test("capitals sit on the planet they belong to", () => {
+  for (const [name, f] of Object.entries(facts)) {
+    if (!f.capital) continue;
+    assert.ok(typeof f.lat === "number" && Math.abs(f.lat) <= 90, `${name} latitude`);
+    assert.ok(typeof f.lon === "number" && Math.abs(f.lon) <= 180, `${name} longitude`);
+  }
+});
+
+test("a story is only ever attached to a country that exists", () => {
+  const isos = new Set(Object.values(facts).map((f) => f.iso));
+  // Singapore is too small for the 110m outline; it keeps its line for when a
+  // finer topology lands. Everything else must match something on the map.
+  const orphans = Object.keys(CAPITAL_STORIES).filter((iso) => !isos.has(iso) && iso !== "SGP");
+  assert.deepEqual(orphans, []);
+  assert.equal(storyFor("ZZZ"), null);
+  assert.equal(storyFor(undefined), null);
+  assert.match(storyFor("ARM") ?? "", /Erebuni/);
+});
+
+test("stories are prose, not markup", () => {
+  for (const [iso, line] of Object.entries(CAPITAL_STORIES)) {
+    assert.ok(line.length > 20, `${iso} is too short to be a story`);
+    assert.doesNotMatch(line, /[*_`]|\[.*\]\(/, `${iso} carries markup the card renders literally`);
+  }
+});
+
+test("the measured line stands in when no story does", () => {
+  assert.equal(factLine(undefined), null);
+  assert.match(factLine(facts["Mongolia"]) ?? "", /landlocked/);
+  assert.match(factLine(facts["Japan"]) ?? "", /no land border/);
+  assert.match(factLine(facts["Brazil"]) ?? "", /10 land neighbours/);
+});
+
+test("numbers read at a glance", () => {
+  assert.equal(formatArea(8_515_767), "8.5 M km²");
+  assert.equal(formatArea(29_743), "30 k km²");
+  assert.equal(formatArea(316), "316 km²");
+  assert.equal(formatPop(11_893_000), "11.9 M");
+  assert.equal(formatPop(29_579), "30 k");
+});
+
+test("rivers are digitised source to mouth, which is the whole premise", () => {
+  const by = new Map(rivers.rivers.map((r) => [r.name, r.coords]));
+  const ends = (name: string) => {
+    const c = by.get(name);
+    assert.ok(c && c.length > 3, `${name} missing`);
+    return { first: c![0], last: c![c!.length - 1] };
+  };
+  // The pulse travels along the stored order, so the order has to be the flow.
+  const nile = ends("Nile");
+  assert.ok(nile.last[1] > nile.first[1] + 20, "the Nile runs north");
+  const congo = ends("Congo");
+  assert.ok(congo.last[0] < congo.first[0] - 8, "the Congo runs west to the Atlantic");
+  const miss = ends("Mississippi");
+  assert.ok(miss.last[1] < miss.first[1] - 8, "the Mississippi runs south to the Gulf");
+  const danube = ends("Danube");
+  assert.ok(danube.last[0] > danube.first[0] + 15, "the Danube runs east to the Black Sea");
+  const amazon = ends("Amazon");
+  assert.ok(amazon.last[0] > amazon.first[0] + 15, "the Amazon runs east to the Atlantic");
+});
+
+test("no river is a stub", () => {
+  for (const r of rivers.rivers) {
+    assert.ok(r.coords.length >= 4, `${r.name} has too few vertices to run anywhere`);
+    assert.ok(r.name.length > 1);
+  }
 });

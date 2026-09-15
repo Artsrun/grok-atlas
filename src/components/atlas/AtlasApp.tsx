@@ -3,6 +3,7 @@ import type { CountryFeat } from "@/lib/atlas/geo";
 import { loadCountries } from "@/lib/atlas/geo";
 import { failBoot, markBoot } from "@/lib/atlas/boot";
 import { offsetFromParam } from "@/lib/atlas/clock";
+import { loadFacts } from "@/lib/atlas/facts";
 import { focusForCountry } from "@/lib/atlas/fly";
 import { hashAt, installHashSync } from "@/lib/atlas/hash";
 import { deviceCaps } from "@/lib/atlas/device";
@@ -11,6 +12,7 @@ import { focusOf, RIDE_ID, VIEWS } from "@/lib/atlas/model";
 import { useAtlas } from "@/lib/atlas/store";
 import { GlobeCanvas } from "@/components/globe/GlobeCanvas";
 import { BootNote, BootStrip } from "./BootScreen";
+import { CountrySheet } from "./CountrySheet";
 import { Hud } from "./Hud";
 import { QuietHud } from "./QuietHud";
 
@@ -25,6 +27,20 @@ export function AtlasApp() {
   const cupola = useAtlas((s) => s.cupola);
   // Read during render, before the rig can write one of its own.
   const bootHash = useRef(hashAt());
+
+  // Capitals and measurements ride in behind the outlines: a country is
+  // clickable the moment the topology lands, and gains its facts a beat later.
+  useEffect(() => {
+    let live = true;
+    loadFacts()
+      .then((f) => {
+        if (live) useAtlas.getState().setFacts(f);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -138,6 +154,7 @@ export function AtlasApp() {
       ) : null}
       <BootStrip />
       <BootNote />
+      <CountrySheet />
       <div className="pointer-events-none absolute inset-0 z-20">
         {edition === "2" ? (
           <Hud countries={countries} onQuiet={() => setEdition("3")} />

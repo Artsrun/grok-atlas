@@ -69,6 +69,7 @@ type ToggleId =
   | "showBorders"
   | "showCage"
   | "showIss"
+  | "showRivers"
   | "showMoon"
   | "showTides"
   | "cupola"
@@ -80,6 +81,7 @@ const LAYER_TIPS: Record<ToggleId, string> = {
   showBorders: "Natural Earth 110m outlines.",
   showCage: "Graticule, shell, degree readings.",
   showIss: "Live ZARYA pin, 5 s poll.",
+  showRivers: "Twelve great rivers, running downstream.",
   showMoon: "Phase disc, declared range.",
   showTides: "P2 lunar + 0.46 solar bulge.",
   cupola: "Window vignette. ISS frame.",
@@ -522,6 +524,7 @@ function ShellSection({ compact }: { compact: boolean }) {
         <LayerToggle id="showClouds" label="clouds" />
         <LayerToggle id="showBorders" label="borders" />
         <LayerToggle id="showIss" label="ISS" />
+        <LayerToggle id="showRivers" label="rivers" />
         <LayerToggle id="showMoon" label="moon" />
         <LayerToggle id="showTides" label="tides" />
         <LayerToggle id="showCage" label="cage" />
@@ -990,24 +993,6 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
             <span className="block h-1 w-10 bg-etch" />
           </button>
         )}
-        {selected && (
-          <section className="border-b border-etch p-3">
-            <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-              <span className="text-ochre">§02</span>
-              <span className="font-semibold tracking-[0.2em]">Selected</span>
-              <span className="text-dimmer">FIG.2</span>
-            </div>
-            <div className="font-display text-lg tracking-wide text-silk">{selected}</div>
-            <button
-              type="button"
-              className="press mt-2 min-h-11 w-full border border-etch font-mono text-2xs uppercase tracking-[0.12em] text-dim hover:text-silk"
-              onClick={() => useAtlas.getState().select(null)}
-            >
-              Clear
-            </button>
-          </section>
-        )}
-
         <TimeSection compact={!fine} />
         <ViewsSection countries={countries} names={names} compact={!fine} />
         {/* Views first on a phone: the tray opens 279px tall, and a tide
