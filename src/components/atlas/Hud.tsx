@@ -68,7 +68,9 @@ type ToggleId =
   | "showClouds"
   | "showBorders"
   | "showCage"
+  | "showGrid"
   | "showIss"
+  | "showRivers"
   | "showMoon"
   | "showTides"
   | "cupola"
@@ -78,8 +80,10 @@ const LAYER_TIPS: Record<ToggleId, string> = {
   showAtmosphere: "Limb airglow. Cheap pass.",
   showClouds: "Drifting cloud deck.",
   showBorders: "Natural Earth 110m outlines.",
-  showCage: "Graticule, shell, degree readings.",
+  showCage: "Geodesic shell. Chrome, no scale.",
+  showGrid: "30° graticule with degree readings.",
   showIss: "Live ZARYA pin, 5 s poll.",
+  showRivers: "Twelve great rivers, running downstream.",
   showMoon: "Phase disc, declared range.",
   showTides: "P2 lunar + 0.46 solar bulge.",
   cupola: "Window vignette. ISS frame.",
@@ -323,11 +327,13 @@ function TimeSection({ compact }: { compact: boolean }) {
 
   return (
     <section className="border-b border-etch p-3">
-      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-        <span className="text-ochre">§01</span>
-        <span className="font-semibold tracking-[0.2em]">Time</span>
-        <span className="text-dimmer">FIG.1</span>
-      </div>
+      {!compact && (
+        <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+          <span className="text-ochre">§01</span>
+          <span className="font-semibold tracking-[0.2em]">Time</span>
+          <span className="text-dimmer">FIG.1</span>
+        </div>
+      )}
 
       <div className="flex items-baseline justify-between">
         <span className={`font-mono text-sm tabular-nums ${live ? "text-dim" : "text-ochre"}`}>
@@ -502,33 +508,64 @@ function ShellSection({ compact }: { compact: boolean }) {
 
   return (
     <section className="border-b border-etch p-3">
-      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-        <span className="text-ochre">§04</span>
-        <span className="font-semibold tracking-[0.2em]">Shell</span>
-        <span className="text-dimmer">FIG.4</span>
-      </div>
-      {compact ? (
-        <details>
-          <summary className="press min-h-11 cursor-pointer list-none font-mono text-2xs uppercase tracking-[0.14em] text-ochre">
-            Sliders · night / bump / grain
-          </summary>
-          {sliders}
-        </details>
-      ) : (
-        sliders
+      {!compact && (
+        <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+          <span className="text-ochre">§05</span>
+          <span className="font-semibold tracking-[0.2em]">Shell</span>
+          <span className="text-dimmer">FIG.5</span>
+        </div>
       )}
-      <div className="mt-3 grid grid-cols-2 gap-1">
-        <LayerToggle id="showAtmosphere" label="atmosphere" />
-        <LayerToggle id="showClouds" label="clouds" />
+      {sliders}
+    </section>
+  );
+}
+
+/** A group of switches with one word saying what they have in common. */
+function LayerGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <>
+      <p className="mt-2 font-mono text-2xs uppercase tracking-[0.18em] text-dimmer">{title}</p>
+      <div className="mt-1 grid grid-cols-2 gap-1">{children}</div>
+    </>
+  );
+}
+
+/**
+ * Everything that can be on or off, in three groups that answer three
+ * questions: what is drawn on the earth, what is drawn around it, and what the
+ * window itself does. As one flat grid of twelve it was a wall of switches
+ * buried under four sliders in a section called Shell.
+ */
+function LayersSection({ compact }: { compact: boolean }) {
+  return (
+    <section className="border-b border-etch p-3">
+      {!compact && (
+        <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+          <span className="text-ochre">§04</span>
+          <span className="font-semibold tracking-[0.2em]">Layers</span>
+          <span className="text-dimmer">FIG.4</span>
+        </div>
+      )}
+      <LayerGroup title="on the earth">
         <LayerToggle id="showBorders" label="borders" />
-        <LayerToggle id="showIss" label="ISS" />
-        <LayerToggle id="showMoon" label="moon" />
+        <LayerToggle id="showRivers" label="rivers" />
+        <LayerToggle id="showClouds" label="clouds" />
         <LayerToggle id="showTides" label="tides" />
-        <LayerToggle id="showCage" label="cage" />
+      </LayerGroup>
+      <LayerGroup title="around it">
+        <LayerToggle id="showAtmosphere" label="atmosphere" />
+        <LayerToggle id="showMoon" label="moon" />
+        <LayerToggle id="showIss" label="ISS" />
         <RideToggle />
+      </LayerGroup>
+      <LayerGroup title="grid and frame">
+        {/* Two switches, because they answer two questions: where am I, and
+            how much chrome do I want. */}
+        <LayerToggle id="showGrid" label="geo net" />
+        <LayerToggle id="showCage" label="cage" />
         <LayerToggle id="cupola" label="cupola" />
         <LayerToggle id="autoRotate" label="orbit" />
-      </div>
+      </LayerGroup>
     </section>
   );
 }
@@ -688,11 +725,13 @@ function ViewsSection({
 
   return (
     <section className="border-b border-etch p-3">
-      <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-        <span className="text-ochre">§03</span>
-        <span className="font-semibold tracking-[0.2em]">Views</span>
-        <span className="text-dimmer">FIG.3</span>
-      </div>
+      {!compact && (
+        <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
+          <span className="text-ochre">§03</span>
+          <span className="font-semibold tracking-[0.2em]">Views</span>
+          <span className="text-dimmer">FIG.3</span>
+        </div>
+      )}
       {!compact && (
         <div className="grid gap-1">
           {VIEWS.map((s) => (
@@ -787,6 +826,46 @@ function MobileDock() {
   );
 }
 
+/**
+ * The phone tray is 317 px tall and held 1,258 px of controls — four screens
+ * of scrolling, the first of which was entirely the time machine. Same
+ * sections, one tap apart, each pane sized to the screen it actually gets.
+ */
+const TABS = [
+  { id: "go", label: "Go" },
+  { id: "show", label: "Show" },
+  { id: "time", label: "Time" },
+  { id: "look", label: "Look" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
+function TrayTabs({ active, onPick }: { active: TabId; onPick: (id: TabId) => void }) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Toolbox"
+      className="sticky top-11 z-10 grid grid-cols-4 gap-1 border-b border-etch bg-substrate px-3 pb-2"
+    >
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={active === t.id}
+          aria-controls={`tray-${t.id}`}
+          onClick={() => onPick(t.id)}
+          className={`press min-h-11 border font-mono text-2xs uppercase tracking-[0.14em] ${
+            active === t.id ? "border-ochre bg-substrate-2 text-ochre" : "border-etch text-dimmer"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet: () => void }) {
   const selected = useAtlas((s) => s.selected);
   const panelOpen = useAtlas((s) => s.panelOpen);
@@ -795,6 +874,7 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
   const names = useMemo(() => countries.map((c) => c.name).sort(), [countries]);
   const swipeY = useRef<number | null>(null);
   const locate = useLocate();
+  const [tab, setTab] = useState<TabId>("go");
   const open = fine ? railOpen : panelOpen;
 
   /**
@@ -896,8 +976,6 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
             ["bg-lichen", "airglow limb"],
             ["bg-bone", "moon"],
             ["bg-defender", "high tide"],
-            ["bg-silk", "Yerevan"],
-            ["bg-rust", "Ararat"],
           ].map(([dot, label]) => (
             <div key={label}>
               <i className={`mr-2 inline-block h-1.5 w-1.5 ${dot}`} />
@@ -990,35 +1068,33 @@ export function Hud({ countries, onQuiet }: { countries: CountryFeat[]; onQuiet:
             <span className="block h-1 w-10 bg-etch" />
           </button>
         )}
-        {selected && (
-          <section className="border-b border-etch p-3">
-            <div className="mb-2 flex items-baseline justify-between font-mono text-2xs uppercase tracking-[0.18em]">
-              <span className="text-ochre">§02</span>
-              <span className="font-semibold tracking-[0.2em]">Selected</span>
-              <span className="text-dimmer">FIG.2</span>
+        {fine ? (
+          <>
+            <TimeSection compact={false} />
+            <ViewsSection countries={countries} names={names} compact={false} />
+            <LayersSection compact={false} />
+            <ShellSection compact={false} />
+            <PointerSection />
+          </>
+        ) : (
+          <>
+            <TrayTabs active={tab} onPick={setTab} />
+            <div id={`tray-${tab}`} role="tabpanel">
+              {tab === "go" && <ViewsSection countries={countries} names={names} compact />}
+              {tab === "show" && <LayersSection compact />}
+              {tab === "time" && <TimeSection compact />}
+              {tab === "look" && (
+                <>
+                  <ShellSection compact />
+                  <div className="border-b border-etch p-3">
+                    <TideGauge countries={countries} />
+                  </div>
+                  <TiltSection />
+                </>
+              )}
             </div>
-            <div className="font-display text-lg tracking-wide text-silk">{selected}</div>
-            <button
-              type="button"
-              className="press mt-2 min-h-11 w-full border border-etch font-mono text-2xs uppercase tracking-[0.12em] text-dim hover:text-silk"
-              onClick={() => useAtlas.getState().select(null)}
-            >
-              Clear
-            </button>
-          </section>
+          </>
         )}
-
-        <TimeSection compact={!fine} />
-        <ViewsSection countries={countries} names={names} compact={!fine} />
-        {/* Views first on a phone: the tray opens 279px tall, and a tide
-            readout is not what a thumb came for. */}
-        {!fine && (
-          <div className="border-b border-etch p-3">
-            <TideGauge countries={countries} />
-          </div>
-        )}
-        <ShellSection compact={!fine} />
-        {fine ? <PointerSection /> : <TiltSection />}
       </aside>
     </>
   );

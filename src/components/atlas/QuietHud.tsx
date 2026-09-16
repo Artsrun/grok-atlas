@@ -51,7 +51,9 @@ export function QuietHud({ onInstrument }: { onInstrument: () => void }) {
   const focus = useAtlas((s) => s.focus);
   const iss = useAtlas((s) => s.iss);
   const ride = useAtlas((s) => s.issRide);
-  const caption = ride ? "ISS" : (selected ?? focus?.label ?? "");
+  // The country sheet carries a selected country now, with its capital and its
+  // story; the caption keeps the places a country never had — views and the ride.
+  const caption = ride ? "ISS" : selected ? "" : (focus?.label ?? "");
   const [hint, setHint] = useState(true);
   const atMinute = useAtlas((s) => Math.floor(s.clockAt / 60000));
   const fine = useFinePointer();

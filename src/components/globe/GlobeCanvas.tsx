@@ -29,7 +29,9 @@ import { createGovernor, publishFrame } from "@/lib/atlas/perf";
 import { markBoot } from "@/lib/atlas/boot";
 import { Earth } from "./Earth";
 import { Borders } from "./Borders";
-import { Cage, HerePin, IssTrack, Luna, Starfield, Station, SunLight } from "./Extras";
+import { Cage, GeoNet, HerePin, IssTrack, Luna, Starfield, Station, SunLight } from "./Extras";
+import { Capital } from "./Capital";
+import { Rivers } from "./Rivers";
 
 const HOME_POS = ll2xyz(HOME.lat, HOME.lon, HOME.dist);
 const ARRIVED_ANGLE = 0.014;
@@ -291,6 +293,7 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
   const ray = useMemo(() => new THREE.Raycaster(), []);
   const ptr = useMemo(() => new THREE.Vector2(), []);
   const slop = isFinePointer() ? ORBIT.fine.tap : ORBIT.coarse.tap;
+  const hoverable = isFinePointer();
 
   useEffect(() => {
     const el = gl.domElement;
@@ -306,16 +309,7 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
       start = null;
       if (!from || from.id !== e.pointerId) return;
       if (Math.hypot(e.clientX - from.x, e.clientY - from.y) > slop) return;
-      const earth = scene.getObjectByName("earth");
-      if (!earth) return;
-      const rect = el.getBoundingClientRect();
-      ptr.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      ptr.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      ray.setFromCamera(ptr, camera);
-      const hit = ray.intersectObject(earth, false)[0];
-      if (!hit?.point) return;
-      const { lat, lon } = xyz2ll(hit.point.x, hit.point.y, hit.point.z);
-      const name = pickCountry(countries, lat, lon);
+      const name = nameAt(e.clientX, e.clientY);
       const st = useAtlas.getState();
       if (!name) {
         st.select(null);
@@ -325,15 +319,63 @@ function Picker({ countries }: { countries: CountryFeat[] }) {
       const c = countries.find((x) => x.name === name);
       if (c) st.flyTo(focusForCountry(c));
     };
+    /**
+     * Hover, for pointers that have one. The map should answer before it is
+     * clicked: the country under the cursor lights its own outline, and the
+     * cursor says it is a target. Coarse pointers get nothing — a finger
+     * hovering over a country is a finger about to tap it.
+     */
+    const nameAt = (x: number, y: number): string | null => {
+      const earth = scene.getObjectByName("earth");
+      if (!earth) return null;
+      const rect = el.getBoundingClientRect();
+      ptr.x = ((x - rect.left) / rect.width) * 2 - 1;
+      ptr.y = -((y - rect.top) / rect.height) * 2 + 1;
+      ray.setFromCamera(ptr, camera);
+      const hit = ray.intersectObject(earth, false)[0];
+      if (!hit?.point) return null;
+      const { lat, lon } = xyz2ll(hit.point.x, hit.point.y, hit.point.z);
+      return pickCountry(countries, lat, lon);
+    };
+
+    let queued = 0;
+    let at: { x: number; y: number } | null = null;
+    const move = (e: PointerEvent) => {
+      // One pick per frame at most: pointermove fires far faster than a
+      // point-in-polygon sweep over 177 features deserves.
+      at = { x: e.clientX, y: e.clientY };
+      if (queued || start) return;
+      queued = requestAnimationFrame(() => {
+        queued = 0;
+        if (!at) return;
+        const name = nameAt(at.x, at.y);
+        useAtlas.getState().hover(name);
+        el.style.cursor = name ? "pointer" : "";
+      });
+    };
+    const leave = () => {
+      at = null;
+      useAtlas.getState().hover(null);
+      el.style.cursor = "";
+    };
+
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", cancel);
+    if (hoverable) {
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerleave", leave);
+    }
     return () => {
+      if (queued) cancelAnimationFrame(queued);
       el.removeEventListener("pointerdown", down);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", cancel);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerleave", leave);
+      el.style.cursor = "";
     };
-  }, [camera, scene, gl, countries, ray, ptr, slop]);
+  }, [camera, scene, gl, countries, ray, ptr, slop, hoverable]);
   return null;
 }
 
@@ -393,10 +435,13 @@ function Scene({
         <Earth atlasTex={atlasTex} />
       </Suspense>
       <Borders countries={countries} />
+      <Rivers />
+      <Capital />
       <HerePin />
       <Station />
       <IssTrack />
       <Cage />
+      <GeoNet />
       <OverlayTexture countries={countries} texture={atlasTex} />
       <Rig />
       <Governor />

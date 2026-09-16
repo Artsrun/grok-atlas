@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { requestFly } from "./camera.ts";
 import type { Clock } from "./clock.ts";
+import type { FactBook } from "./facts.ts";
 import { advance, clockMs, LIVE, nudge, skyTick, toggleHold } from "./clock.ts";
 import { skyAt } from "./ephemeris.ts";
 import { focusOf, HOME } from "./model.ts";
@@ -20,7 +21,9 @@ type LayerKey =
   | "showClouds"
   | "showBorders"
   | "showCage"
+  | "showGrid"
   | "showIss"
+  | "showRivers"
   | "showRadio"
   | "showCosmic"
   | "showMoon"
@@ -33,7 +36,11 @@ type LayerKey =
 
 type AtlasState = {
   names: string[];
+  /** Capital, region and measurements per country name. Empty until loaded. */
+  facts: FactBook;
   selected: string | null;
+  /** Under the pointer, on a mouse. Null on touch, which has no hover. */
+  hovered: string | null;
   /** Sky positions are derived from `clock` — read them, never set them. */
   sunLon: number;
   sunLat: number;
@@ -54,8 +61,13 @@ type AtlasState = {
   showAtmosphere: boolean;
   showClouds: boolean;
   showBorders: boolean;
+  /** The geodesic shell. Chrome, and honest about it. */
   showCage: boolean;
+  /** The 30° graticule and its degree readings. Navigation, not chrome. */
+  showGrid: boolean;
   showIss: boolean;
+  /** The twelve great rivers, running downstream. */
+  showRivers: boolean;
   showRadio: boolean;
   showCosmic: boolean;
   /** Planetary Kp 0–9. Drives cosmic rate. Fail-open 2. */
@@ -77,7 +89,9 @@ type AtlasState = {
   /** Northbound leg of the orbit — the ground track needs the branch. */
   issAsc: boolean;
   setNames: (n: string[]) => void;
+  setFacts: (f: FactBook) => void;
   select: (name: string | null) => void;
+  hover: (name: string | null) => void;
   setRate: (rate: number) => void;
   /** Play/pause. Resumes at whatever rate it was holding from. */
   holdClock: () => void;
@@ -116,7 +130,9 @@ let sinceSky = SKY_TICK;
 
 export const useAtlas = create<AtlasState>((set, get) => ({
   names: [],
+  facts: {},
   selected: null,
+  hovered: null,
   sunLon: boot.sunLon,
   sunLat: boot.sunLat,
   moonLon: boot.moonLon,
@@ -134,7 +150,9 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   showClouds: true,
   showBorders: true,
   showCage: false,
+  showGrid: false,
   showIss: true,
+  showRivers: true,
   showRadio: false,
   showCosmic: false,
   kp: 2,
@@ -150,7 +168,11 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   iss: null,
   issAsc: true,
   setNames: (names) => set({ names }),
+  setFacts: (facts) => set({ facts }),
   select: (selected) => set({ selected }),
+  hover: (hovered) => {
+    if (get().hovered !== hovered) set({ hovered });
+  },
   setRate: (rate) => {
     set({ clock: { ...get().clock, rate }, resumeRate: rate === 0 ? get().resumeRate : rate });
     get().tickOrbits();

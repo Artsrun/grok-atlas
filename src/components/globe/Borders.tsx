@@ -24,6 +24,7 @@ function outlineGeometry(countries: CountryFeat[], r: number): THREE.BufferGeome
 export function Borders({ countries }: { countries: CountryFeat[] }) {
   const show = useAtlas((s) => s.showBorders);
   const selected = useAtlas((s) => s.selected);
+  const hovered = useAtlas((s) => s.hovered);
 
   const all = useMemo(() => outlineGeometry(countries, 1.003), [countries]);
 
@@ -32,16 +33,33 @@ export function Borders({ countries }: { countries: CountryFeat[] }) {
     return c ? outlineGeometry([c], 1.006) : null;
   }, [countries, selected]);
 
+  /**
+   * One country's rings, rebuilt when the cursor crosses a border. It is a few
+   * hundred segments and it only happens on a change, not on a move — the
+   * picker already collapses a stream of pointermoves into one pick a frame.
+   */
+  const hoverGeo = useMemo(() => {
+    if (!hovered || hovered === selected) return null;
+    const c = countries.find((x) => x.name === hovered);
+    return c ? outlineGeometry([c], 1.005) : null;
+  }, [countries, hovered, selected]);
+
   useEffect(() => () => all.dispose(), [all]);
   useEffect(() => () => selectedGeo?.dispose(), [selectedGeo]);
+  useEffect(() => () => hoverGeo?.dispose(), [hoverGeo]);
 
-  if (!show && !selected) return null;
+  if (!show && !selected && !hoverGeo) return null;
 
   return (
     <group>
       {show && (
         <lineSegments geometry={all} frustumCulled={false}>
           <lineBasicMaterial color="#9aa3c2" transparent opacity={0.22} depthWrite={false} />
+        </lineSegments>
+      )}
+      {hoverGeo && (
+        <lineSegments geometry={hoverGeo} frustumCulled={false}>
+          <lineBasicMaterial color="#e8e6e1" transparent opacity={0.55} depthWrite={false} />
         </lineSegments>
       )}
       {selectedGeo && (

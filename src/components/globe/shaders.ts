@@ -336,3 +336,82 @@ void main() {
   #include <colorspace_fragment>
 }
 `;
+
+/**
+ * Rivers, with the current running down them. Natural Earth digitises a
+ * centreline from source to mouth, so the vertex order *is* the flow
+ * direction — `aFlow` carries distance along that order, and the pulse is a
+ * phase that increases with it, which makes it travel downstream and only
+ * downstream. Nothing here is decorative: reverse the buffer and the Nile
+ * would run the wrong way.
+ */
+export const RIVER_VERT = /* glsl */ `
+attribute vec3 aOther;
+attribute float aSide;
+attribute float aFlow;
+attribute float aSeed;
+uniform vec3 uCamPos;
+uniform vec2 uResolution;
+uniform float uWidth;
+varying float vFlow;
+varying float vSeed;
+varying float vFace;
+varying float vEdge;
+
+void main() {
+  vFlow = aFlow;
+  vSeed = aSeed;
+  vEdge = aSide;
+  vec3 world = (modelMatrix * vec4(position, 1.0)).xyz;
+  vFace = dot(normalize(world), normalize(uCamPos - world));
+
+  vec4 here = projectionMatrix * viewMatrix * vec4(world, 1.0);
+  vec4 there = projectionMatrix * viewMatrix * modelMatrix * vec4(aOther, 1.0);
+
+  /**
+   * A ribbon, widened in screen space. GL line width is one pixel on every GPU
+   * that matters, and one semi-transparent pixel over a lit desert is not a
+   * river — it is a rumour of one.
+   */
+  vec2 a = here.xy / here.w;
+  vec2 b = there.xy / there.w;
+  vec2 dir = (b - a) * uResolution;
+  float len = length(dir);
+  vec2 unit = len > 1e-6 ? dir / len : vec2(1.0, 0.0);
+  vec2 side = vec2(-unit.y, unit.x) / uResolution * uWidth * aSide;
+  here.xy += side * here.w;
+  gl_Position = here;
+}
+`;
+
+export const RIVER_FRAG = /* glsl */ `
+uniform vec3 uCourse;
+uniform vec3 uPulse;
+uniform float uTime;
+uniform float uOpacity;
+varying float vFlow;
+varying float vSeed;
+varying float vFace;
+varying float vEdge;
+
+void main() {
+  // Rivers on the far side are behind a sphere the depth buffer already
+  // handles; this is the limb, where a line would smear along it.
+  float face = smoothstep(0.02, 0.30, vFace);
+  if (face < 0.01) discard;
+
+  // Soft shoulders, so a widened line still reads as a line and not a strip.
+  float core = 1.0 - smoothstep(0.35, 1.0, abs(vEdge));
+
+  // Pulses travel from source to mouth because aFlow grows that way. Reverse
+  // the buffer and the Nile would run backwards.
+  float phase = fract(uTime * 0.09 + vSeed - vFlow * 3.0);
+  float head = pow(1.0 - phase, 14.0);
+  vec3 col = mix(uCourse, uPulse, head);
+  float alpha = (0.72 + head * 0.28) * core * uOpacity * face;
+  if (alpha < 0.01) discard;
+  gl_FragColor = vec4(col, alpha);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;

@@ -5,22 +5,6 @@ export const DR = Math.PI / 180;
 
 export type LL = { lat: number; lon: number };
 
-/** WGS84 observer — field report §01 (Lake Yerevan). CONSTANT. */
-export const OBS: LL & { h: number; label: string } = {
-  lat: 40.177,
-  lon: 44.487,
-  h: 895,
-  label: "Lake Yerevan",
-};
-
-/** Masis summit. CONSTANT. */
-export const ARARAT: LL & { h: number; label: string } = {
-  lat: 39.702,
-  lon: 44.396,
-  h: 5137,
-  label: "Ararat",
-};
-
 /** ISS frame home — Nile Delta / Eastern Mediterranean. DECLARED. */
 export const NILE: LL & { label: string } = {
   lat: 30.2,
