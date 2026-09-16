@@ -9,16 +9,17 @@ Quiet edition is the default (the window). `?v=2` is the instrument.
 ## Controls
 
 - **Orbit** — drag. Pinch / wheel to zoom. Touch gets a heavier throw and a larger tap slop so a drag does not pick a country.
-- **Phone** — three thumb buttons at the bottom: Locate, ISS ride, Toolbox. The instrument sheet is a short tray: tap the handle or pull it down to close, pull up and it stays. Views live in the tray as a two-column grid — six of them, none off the edge.
+- **Phone** — two thumb buttons at the bottom: Locate and Toolbox. The toolbox is a short tray with four tabs — **Go** (views, find a country, copy the view), **Show** (layers), **Time**, **Look** (sliders, tide, tilt) — because the tray gets 317 px on a phone and the sections stacked came to 1,258. Tap the handle or pull it down to close; pull up and it stays.
 - **Desktop** — right rail, hover tips, pointer section. The rail is 320px of opaque panel over a third of the globe, so it collapses: click the edge grab or press `T`, and the globe gets the whole window back. It scrolls, and fades its bottom edge only while there is more below.
 - **Time** — one clock drives the terminator, the moon phase and the station. Hold it, run it at a minute, an hour or twelve hours a second, forwards or back, scrub ±12 h by hand, jump a day, or press `now` to fall back into the real sky. The clock is gold whenever it is not the real one.
 - **Keys** (desktop) — `T` toolbox, `L` locate, `I` ISS ride, `Space` hold time, `,` `.` scrub an hour, `N` back to now, `Esc` leave the ride then close the toolbox. Nothing fires while a field has focus, so `find country` still takes an `i`.
 - **Country** — tap one and it fills in: the outline lights, the wash lands, and a sheet gives its name, its capital in white, and one true line about that capital. Tap the capital to fly to it. On a mouse, the country under the cursor lights its own outline before you click.
 - **Rivers** — the twelve great rivers, drawn as ribbons with the current running down them. Natural Earth digitises a centreline from source to mouth, so the vertex order *is* the flow: the pulses on the Nile run north and the ones on the Congo run west because that is what the data says.
-- **Views** — Nile Delta, Yerevan, Ararat, Europe, Americas, West Pacific, Lunar stand, ISS ride
+- **Views** — Europe, Americas, West Pacific, Moon stand, ISS ride
 - **ISS ride** — the camera takes the station: cupola glass, ground track running out ahead, live lat / lon / altitude / velocity under the caption. `ISS` on the dock, `iss ride` in the toolbox, `?site=iss` in a link. Any country tap or view leaves the ride and flies back out.
-- **Cage** — 30° graticule with the degree readings written on it (`30°N`, `60°E`), faint geodesic shell behind. Every reading is one quad in one buffer, billboarded in the vertex shader — the whole set costs one draw call.
-- **Layers** — atmosphere, clouds, borders, rivers, cage, ISS, moon, tides, cupola vignette, auto-rotate
+- **Geo net** — 30° graticule with the degree readings written on it (`30°N`, `60°E`). Every reading is one quad in one buffer, billboarded in the vertex shader, so the whole set costs one draw call.
+- **Cage** — the geodesic shell, on its own switch. It is chrome with no scale on it; the net is how you read a longitude, and one switch for both meant nobody could have just one.
+- **Layers** — grouped by what they answer: on the earth (borders, rivers, clouds, tides), around it (atmosphere, moon, ISS, ISS ride), grid and frame (geo net, cage, cupola, orbit)
 - **Grain** — city lights and relief pick up a heavy ISS-style grain on new GPUs (Apple M / A15+, Adreno 6xx+, RTX). Older / software GL stays smooth. Force a path with `?tier=high|mid|low`.
 - **Share** — copies `?c=Armenia`, `?site=nile` or `?site=iss`, plus `?t=` when the clock is off the real sky: a link carries the instant as well as the place.
 

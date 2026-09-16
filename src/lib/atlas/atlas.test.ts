@@ -792,3 +792,34 @@ test("no river is a stub", () => {
     assert.ok(r.name.length > 1);
   }
 });
+
+// ── the toolbox ────────────────────────────────────────────────────────────
+
+test("chrome and scale are two switches, not one", () => {
+  const st = useAtlas.getState;
+  // The shell is decoration at r=1.32; the graticule is how you read a
+  // longitude. Wanting one never meant wanting the other.
+  assert.equal(st().showCage, false);
+  assert.equal(st().showGrid, false);
+  st().toggle("showGrid");
+  assert.equal(st().showGrid, true);
+  assert.equal(st().showCage, false, "the net does not drag the shell on with it");
+  st().toggle("showCage");
+  st().toggle("showGrid");
+  assert.equal(st().showCage, true);
+  assert.equal(st().showGrid, false);
+  st().toggle("showCage");
+});
+
+test("views are places anyone would recognise", () => {
+  assert.equal(new Set(VIEWS.map((v) => v.id)).size, VIEWS.length, "ids are unique");
+  for (const v of VIEWS) {
+    assert.ok(v.label.length > 1 && v.note.length > 1, `${v.id} needs a label and a note`);
+    assert.ok(Math.abs(v.lat) <= 90 && Math.abs(v.lon) <= 180, `${v.id} is off the planet`);
+  }
+  // The observer's own lake was a field-report artefact, not a view of Earth.
+  assert.equal(
+    VIEWS.find((v) => /yerevan/i.test(v.label)),
+    undefined,
+  );
+});

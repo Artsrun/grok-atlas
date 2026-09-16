@@ -1,5 +1,3 @@
-import { OBS } from "./geo.ts";
-
 export type View = {
   id: string;
   label: string;
@@ -9,9 +7,8 @@ export type View = {
   note: string;
 };
 
-/** Camera presets. No Nile — home is the device pin. */
+/** Camera presets. No Nile, no observer — home is the device pin. */
 export const VIEWS: View[] = [
-  { id: "yerevan", label: OBS.label, lat: OBS.lat, lon: OBS.lon, dist: 2.55, note: "observer" },
   { id: "europe", label: "Europe", lat: 47.5, lon: 10.2, dist: 2.9, note: "central mass" },
   { id: "americas", label: "Americas", lat: 18, lon: -78, dist: 3.1, note: "Caribbean" },
   { id: "pacific", label: "West Pacific", lat: 12, lon: 148, dist: 3.2, note: "terminator" },

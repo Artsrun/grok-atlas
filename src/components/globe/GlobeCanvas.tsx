@@ -29,7 +29,7 @@ import { createGovernor, publishFrame } from "@/lib/atlas/perf";
 import { markBoot } from "@/lib/atlas/boot";
 import { Earth } from "./Earth";
 import { Borders } from "./Borders";
-import { Cage, HerePin, IssTrack, Luna, Starfield, Station, SunLight } from "./Extras";
+import { Cage, GeoNet, HerePin, IssTrack, Luna, Starfield, Station, SunLight } from "./Extras";
 import { Capital } from "./Capital";
 import { Rivers } from "./Rivers";
 
@@ -441,6 +441,7 @@ function Scene({
       <Station />
       <IssTrack />
       <Cage />
+      <GeoNet />
       <OverlayTexture countries={countries} texture={atlasTex} />
       <Rig />
       <Governor />

@@ -21,6 +21,7 @@ type LayerKey =
   | "showClouds"
   | "showBorders"
   | "showCage"
+  | "showGrid"
   | "showIss"
   | "showRivers"
   | "showRadio"
@@ -60,7 +61,10 @@ type AtlasState = {
   showAtmosphere: boolean;
   showClouds: boolean;
   showBorders: boolean;
+  /** The geodesic shell. Chrome, and honest about it. */
   showCage: boolean;
+  /** The 30° graticule and its degree readings. Navigation, not chrome. */
+  showGrid: boolean;
   showIss: boolean;
   /** The twelve great rivers, running downstream. */
   showRivers: boolean;
@@ -146,6 +150,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   showClouds: true,
   showBorders: true,
   showCage: false,
+  showGrid: false,
   showIss: true,
   showRivers: true,
   showRadio: false,

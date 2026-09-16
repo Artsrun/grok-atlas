@@ -33,12 +33,29 @@ export function Starfield({ count = 2200 }: { count?: number }) {
   );
 }
 
-/** Geodesic shell, lat/lon graticule, and the degree readings on it. */
+/**
+ * The shell on its own. It is a decoration at r=1.32 with no scale on it, and
+ * it used to ride the same switch as the graticule — so anyone who wanted to
+ * read a longitude also got a wireframe dome, and anyone who wanted the dome
+ * got degree labels they had not asked for.
+ */
 export function Cage() {
   const show = useAtlas((s) => s.showCage);
+  const shell = useMemo(() => new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.32, 1)), []);
+  useEffect(() => () => shell.dispose(), [shell]);
+  if (!show) return null;
+  return (
+    <lineSegments geometry={shell}>
+      <lineBasicMaterial color="#c89050" transparent opacity={0.16} />
+    </lineSegments>
+  );
+}
+
+/** The 30° graticule with its degree readings — the thing you navigate by. */
+export function GeoNet() {
+  const show = useAtlas((s) => s.showGrid);
   const spots = useMemo(() => labelSpots(), []);
 
-  const shell = useMemo(() => new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.32, 1)), []);
   const grid = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(cageSegments(), 3));
@@ -62,12 +79,11 @@ export function Cage() {
 
   useEffect(
     () => () => {
-      shell.dispose();
       grid.dispose();
       quads.dispose();
       atlas.dispose();
     },
-    [shell, grid, quads, atlas],
+    [grid, quads, atlas],
   );
 
   useFrame(({ camera }) => {
@@ -77,9 +93,6 @@ export function Cage() {
   if (!show) return null;
   return (
     <group>
-      <lineSegments geometry={shell}>
-        <lineBasicMaterial color="#c89050" transparent opacity={0.1} />
-      </lineSegments>
       <lineSegments geometry={grid}>
         <lineBasicMaterial color="#c89050" transparent opacity={0.26} depthWrite={false} />
       </lineSegments>
