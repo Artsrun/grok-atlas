@@ -1,7 +1,8 @@
 /**
- * What a country is, beyond an outline: its capital, where that capital sits,
- * and the handful of measured numbers worth putting on screen. Built from
- * Natural Earth and `world-countries` by `scripts/build-atlas-data.mjs`.
+ * What a country is, beyond an outline: its name on the map, the capital as
+ * a place you can fly to, and the handful of measured numbers worth putting
+ * on the sheet. Built from Natural Earth and `world-countries` by
+ * `scripts/build-atlas-data.mjs`.
  */
 
 export type CountryFact = {
@@ -11,6 +12,15 @@ export type CountryFact = {
   lon?: number;
   capitalPop?: number | null;
   iso?: string;
+  /** ISO 3166-1 alpha-2 — flag CDN and short code. */
+  iso2?: string;
+  /** Regional-indicator emoji. */
+  flag?: string;
+  tld?: string[];
+  /** E.164 roots. Area-code forests collapse to the country root. */
+  phones?: string[];
+  currency?: string;
+  langs?: string[];
   region?: string | null;
   subregion?: string | null;
   /** km². */
@@ -41,6 +51,18 @@ export const formatArea = (km2: number): string =>
 /** `11.9 M` — capital population, which is a metro estimate, so no decimals of a person. */
 export const formatPop = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)} M` : `${Math.round(n / 1000)} k`;
+
+/** `.am · .org` — the registry, not the marketing site. */
+export const formatTld = (tld: string[] | undefined): string | null =>
+  tld?.length ? tld.slice(0, 3).join(" · ") : null;
+
+/** `+374` — one root, or a short list. Never the US area-code book. */
+export const formatPhones = (phones: string[] | undefined): string | null =>
+  phones?.length ? phones.slice(0, 4).join(" · ") : null;
+
+/** PNG from flagcdn. Emoji stays as the accessible name. */
+export const flagSrc = (iso2: string | undefined): string | null =>
+  iso2 ? `https://flagcdn.com/h24/${iso2.toLowerCase()}.png` : null;
 
 /**
  * The measured line, for every country. Only what the data says — a country

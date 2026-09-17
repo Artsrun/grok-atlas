@@ -11,23 +11,22 @@ const PIN_R = 1.006;
 const LABEL_R = 1.045;
 
 /**
- * The capital of whatever country is selected: a white star on the map and its
- * name in white beside it. White because everything else on this globe is gold
- * or dim — the capital is the one thing the eye should go to first.
+ * Pin at the capital. The reading next to it is the country you tapped —
+ * the capital name lives on the sheet, not on the globe.
  */
 export function Capital() {
   const selected = useAtlas((s) => s.selected);
   const fact = useAtlas((s) => (s.selected ? s.facts[s.selected] : undefined));
   const mat = useRef<THREE.ShaderMaterial>(null);
 
-  const at = fact?.capital && fact.lat != null && fact.lon != null ? fact : null;
+  const at = fact?.lat != null && fact.lon != null ? fact : null;
 
   const label = useMemo(() => {
-    if (!at?.capital) return null;
-    const atlas = labelAtlas([at.capital.toUpperCase()]);
-    const quad = coordGeometry([{ lat: at.lat!, lon: at.lon!, text: at.capital }], LABEL_R);
+    if (!selected || !at) return null;
+    const atlas = labelAtlas([selected.toUpperCase()]);
+    const quad = coordGeometry([{ lat: at.lat!, lon: at.lon!, text: selected }], LABEL_R);
     return { atlas, quad };
-  }, [at]);
+  }, [at, selected]);
 
   useEffect(
     () => () => {
@@ -45,7 +44,7 @@ export function Capital() {
             uTint: { value: new THREE.Color("#ffffff") },
             uOpacity: { value: 1 },
             uCamPos: { value: new THREE.Vector3() },
-            uSize: { value: 0.07 },
+            uSize: { value: 0.048 },
           }
         : null,
     [label],
