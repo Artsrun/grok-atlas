@@ -32,10 +32,28 @@ export type CountryFact = {
 
 export type FactBook = Record<string, CountryFact>;
 
+export type VitalBook = Record<
+  string,
+  Pick<CountryFact, "iso2" | "flag" | "tld" | "phones" | "currency" | "langs">
+>;
+
+export const attachVitals = (facts: FactBook, vitals: VitalBook): FactBook => {
+  for (const f of Object.values(facts)) {
+    const v = f.iso ? vitals[f.iso] : undefined;
+    if (v) Object.assign(f, v);
+  }
+  return facts;
+};
+
 export async function loadFacts(): Promise<FactBook> {
-  const res = await fetch("/geo/country-facts.json");
-  if (!res.ok) throw new Error("country facts unreachable");
-  return (await res.json()) as FactBook;
+  const [factsRes, vitalRes] = await Promise.all([
+    fetch("/geo/country-facts.json"),
+    fetch("/geo/country-vitals.json"),
+  ]);
+  if (!factsRes.ok) throw new Error("country facts unreachable");
+  const facts = (await factsRes.json()) as FactBook;
+  if (!vitalRes.ok) return facts;
+  return attachVitals(facts, (await vitalRes.json()) as VitalBook);
 }
 
 const fmt = new Intl.NumberFormat("en-US");
