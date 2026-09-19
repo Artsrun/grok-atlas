@@ -40,15 +40,15 @@ export function BootStrip() {
   const boot = useBoot();
   const [stalled, setStalled] = useState(false);
 
-  // A texture that never resolves used to leave a bar sitting at 30% with
-  // nothing to say. Say it.
+  // Leave on the first photoreal frame. Night lights still load; they are not
+  // the window. A 735 KB night map used to hold the strip after the sphere was lit.
   useEffect(() => {
-    if (boot.ready) return;
+    if (boot.lit) return;
     const id = setTimeout(() => setStalled(true), STALL_AFTER);
     return () => clearTimeout(id);
-  }, [boot.ready, boot.label]);
+  }, [boot.lit, boot.label]);
 
-  if (boot.ready) return null;
+  if (boot.lit) return null;
   const pct = Math.max(8, Math.round(boot.progress * 100));
   return (
     <div
