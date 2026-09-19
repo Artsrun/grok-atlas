@@ -6,6 +6,14 @@ Home camera is the Nile Delta / Eastern Mediterranean — the cupola night-limb 
 
 Quiet edition is the default (the window). `?v=2` is the instrument.
 
+Live: [grok-atlas.vercel.app](https://grok-atlas.vercel.app)
+
+Share:
+
+- [Armenia](https://grok-atlas.vercel.app/?c=Armenia)
+- [ISS ride](https://grok-atlas.vercel.app/?site=iss)
+- [Instrument](https://grok-atlas.vercel.app/?v=2)
+
 ## Controls
 
 - **Orbit** — drag. Pinch / wheel to zoom. Touch gets a heavier throw and a larger tap slop so a drag does not pick a country.

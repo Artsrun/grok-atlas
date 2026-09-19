@@ -1,26 +1,31 @@
-# Session sum-up — GROK.ATLAS V3
+# Session — GROK.ATLAS
 
-PR: quiet edition. Default is the Earth. Instrument stays behind `?v=2`.
+Default is V3 (the window). Instrument is `?v=2`. Same globe, same shaders, same country tap.
 
-## What we tried tonight
+Live: https://grok-atlas.vercel.app — production branch `prod`.
 
-| Cut | What it was | Load |
-|---|---|---|
-| IGC v1 | SOC panels + EONET/USGS/ISS/EPIC around a globe | high |
-| Cupola v2 | instrument chrome, views, shell sliders, tide, moon ring | high, on purpose |
-| Cupola v4 | v2 chrome + live NASA drawer | higher |
-| **V3** | wordmark · UTC · one caption | **low** |
+## Freeze (2026-09-20)
 
-V2 is the observatory. V3 is the window. Same globe, same shaders, same country tap.
+Do not add helix, geodesic-volume, or NASA EONET until:
 
-## V3 rules
+1. First photoreal frame (day map) is measured on a phone.
+2. The App Builder scaffold (auth / PGlite / P2P) is stripped in its own PR.
 
-- No panels, chips, sliders, legends, tickers, badges, FIG numbers.
-- One name on screen when a country or view is active.
-- Hint (“tap a country”) dies after 4s.
-- Tap `GROK.ATLAS` → instrument (`?v=2`).
-- Crop corners only on v2.
+Last feature on `prod`: country vitals (flag, TLD, E.164) — 17 Sep.
 
-## Not in this PR
+## Share surface
 
-Helix / geodesic-volume modes. NASA EONET drawer. Those stay sketches until V3 is the default people actually use.
+- Window: https://grok-atlas.vercel.app/?c=Armenia
+- Ride: https://grok-atlas.vercel.app/?site=iss
+- Instrument: https://grok-atlas.vercel.app/?v=2
+
+## Stale branches (delete after this lands)
+
+`claude/grok-changes-cage-coords-5ya9v8`
+`claude/review-improvements-wc75x2`
+`feat/device-grain`
+`feat/iss-radio-cosmic`
+`feat/mobile-boot`
+`real-sky`
+`v3-quiet`
+`v3/quiet-hud`
