@@ -86,12 +86,20 @@ export function subscribeBoot(fn: () => void) {
   };
 }
 
-/** HTTP-cache the two maps the first frame actually needs. */
+const DAY = "/earth/day.jpg";
+const NIGHT = "/earth/night.png";
+
+/** HTTP-cache the day map first. Night follows so it does not steal the pipe. */
 export function warmEarth() {
   if (typeof Image === "undefined") return;
-  for (const src of ["/earth/day.jpg", "/earth/night.png"]) {
-    const img = new Image();
-    img.decoding = "async";
-    img.src = src;
-  }
+  const day = new Image();
+  day.decoding = "async";
+  day.fetchPriority = "high";
+  day.onload = () => {
+    const night = new Image();
+    night.decoding = "async";
+    night.fetchPriority = "low";
+    night.src = NIGHT;
+  };
+  day.src = DAY;
 }

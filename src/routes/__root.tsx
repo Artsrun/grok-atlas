@@ -23,11 +23,10 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
-      // The two maps the first photoreal frame needs. `warmEarth` cannot start
-      // them until the atlas chunk has downloaded and mounted; the head can
-      // start them while that chunk is still in flight.
-      { rel: "preload", as: "image", href: "/earth/day.jpg" },
-      { rel: "preload", as: "image", href: "/earth/night.png" },
+      // Day map is the first photoreal frame. Night is 735 KB and used to ride
+      // the same high-priority preload, so the two maps split a phone pipe.
+      { rel: "preload", as: "image", href: "/earth/day.jpg", fetchPriority: "high" },
+      { rel: "preload", as: "image", href: "/earth/night.png", fetchPriority: "low" },
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
