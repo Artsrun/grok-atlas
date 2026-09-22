@@ -147,7 +147,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   tideGain: 1,
   grainMix: 1,
   showAtmosphere: true,
-  showClouds: true,
+  showClouds: false,
   showBorders: true,
   showCage: false,
   showGrid: false,
@@ -233,9 +233,6 @@ export const useAtlas = create<AtlasState>((set, get) => ({
     const s = get();
     const moved = s.clock.rate !== 1;
     const clock = moved ? advance(s.clock, dt) : s.clock;
-    // Live, the sun moves 0.004° per frame and reading the clock to find that
-    // out costs more than the set does. Running, every frame is animation and
-    // a stale sun steps visibly across the terminator.
     sinceSky += dt;
     if (sinceSky < skyTick(clock.rate, SKY_TICK)) {
       if (moved) set({ clock });
