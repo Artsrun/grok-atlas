@@ -2,7 +2,8 @@ import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { markBoot } from "@/lib/atlas/boot";
+import { failBoot, markBoot } from "@/lib/atlas/boot";
+import { liveCloudUrl } from "@/lib/atlas/clouds";
 import { useAtlas } from "@/lib/atlas/store";
 import { ll2xyzInto } from "@/lib/atlas/geo";
 import { moonLit, moonXYZ } from "@/lib/atlas/tide";
@@ -55,12 +56,6 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
     return g;
   }, [cap.sphereSeg]);
 
-  /**
-   * One sphere for both airglow shells. They differ by scale and a uniform, so
-   * two 64×48 geometries were two uploads and twice the vertex memory for the
-   * same 3k triangles. Phones get a coarser one — the shells are a soft fresnel
-   * wash, and nothing in them reads silhouette detail.
-   */
   const atmoGeo = useMemo(() => {
     const seg: [number, number] = cap.tier === "high" ? [64, 48] : [40, 28];
     return new THREE.SphereGeometry(1, seg[0], seg[1]);
@@ -124,8 +119,6 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
     (async () => {
       const night = await take("/earth/night.png", true);
       if (night) {
-        // The halo samples it off-centre and the limb sees it at a grazing
-        // angle: without mips and anisotropy that is aliasing, not a city.
         night.generateMipmaps = true;
         night.minFilter = THREE.LinearMipmapLinearFilter;
         night.magFilter = THREE.LinearFilter;
@@ -150,13 +143,6 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
         ...(normal ? { uNormal: normal } : null),
       }));
       markBoot("maps");
-
-      const clouds = await take("/earth/clouds.png", true);
-      if (dead) return;
-      if (clouds) {
-        clouds.wrapS = THREE.RepeatWrapping;
-        setCloudMap(clouds);
-      }
       markBoot("clouds");
     })().catch(() => {
       markBoot("night");
@@ -170,13 +156,51 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
     };
   }, [cap.anisotropy, cap.tier, uniforms]);
 
+  const showClouds = useAtlas((s) => s.showClouds);
+
+  useEffect(() => {
+    if (!showClouds) {
+      setCloudMap((prev) => {
+        prev?.dispose();
+        return null;
+      });
+      return;
+    }
+    let dead = false;
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin("anonymous");
+    const url = liveCloudUrl(cap.tier);
+    loader
+      .loadAsync(url)
+      .then((t) => {
+        if (dead) {
+          t.dispose();
+          return;
+        }
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.wrapS = THREE.RepeatWrapping;
+        t.anisotropy = cap.anisotropy;
+        t.needsUpdate = true;
+        setCloudMap((prev) => {
+          prev?.dispose();
+          return t;
+        });
+      })
+      .catch(() => {
+        if (dead) return;
+        useAtlas.setState({ showClouds: false });
+        failBoot("clouds", "cloud feed offline · deck stays clear");
+      });
+    return () => {
+      dead = true;
+    };
+  }, [showClouds, cap.tier, cap.anisotropy]);
+
   useEffect(() => {
     const live = earthMat.current?.uniforms;
     for (const key of Object.keys(maps) as MapSlot[]) {
       const tex = maps[key];
       if (!tex) continue;
-      // The memo, so a material built after this still gets it; the material,
-      // because that is the copy the GPU is actually reading.
       uniforms[key].value = tex;
       if (live?.[key]) live[key].value = tex;
     }
@@ -214,12 +238,9 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
   const sunVec = useMemo(() => new THREE.Vector3(), []);
   const moonVec = useMemo(() => new THREE.Vector3(), []);
 
-  /** Octaves are linked, not branched — the tier picks the shader it can run. */
   const defines = useMemo(
     () => ({
       GRAIN_OCTAVES: cap.tier === "high" ? 3 : cap.tier === "mid" ? 2 : 1,
-      // Four extra texture fetches per fragment for the city haze. The compat
-      // path does not link them at all.
       NIGHT_BLOOM: cap.tier === "low" ? 0 : 1,
     }),
     [cap.tier],
@@ -256,7 +277,6 @@ export function Earth({ atlasTex }: { atlasTex: THREE.CanvasTexture }) {
   });
 
   const showAtmo = useAtlas((s) => s.showAtmosphere);
-  const showClouds = useAtlas((s) => s.showClouds);
 
   return (
     <group>
