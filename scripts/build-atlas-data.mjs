@@ -183,9 +183,10 @@ async function main() {
   for (const f of rivers.features) {
     const name = f.properties?.name;
     if (!name || f.geometry?.type !== "LineString") continue;
-    // Natural Earth digitises a centreline from source to mouth, which is the
-    // whole point here: the vertex order *is* the flow direction. Verified
-    // against the Nile (north), Congo (west), Mississippi (south), Danube (east).
+    // NE ships a 2-vertex "Yangtze" stub next to the real "Chang" course.
+    if (name === "Yangtze") continue;
+    // Vertex order is source → mouth at 110m. That is a longest-system line,
+    // not the culturally named stem (Mississippi = Missouri–Mississippi, etc).
     const coords = f.geometry.coordinates.map(([lon, lat]) => [round(lon), round(lat)]);
     if (coords.length < 4) continue;
     features.push({ name: LABEL[name] ?? name, coords });
