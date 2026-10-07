@@ -214,7 +214,8 @@ async function main() {
   lakes.sort((a, b) => a.name.localeCompare(b.name));
   await writeFile("public/geo/lakes.json", JSON.stringify({ lakes }) + "\n");
 
-  console.log(`rivers ${features.length}:`, features.map((f) => f.name).join(", "));\n  console.log(`lakes ${lakes.length}:`, lakes.map((f) => f.name).join(", "));
+  console.log(`rivers ${features.length}:`, features.map((f) => f.name).join(", "));
+  console.log(`lakes ${lakes.length}:`, lakes.map((f) => f.name).join(", "));
 }
 
 main().catch((e) => {
