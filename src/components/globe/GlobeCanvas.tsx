@@ -31,6 +31,7 @@ import { Earth } from "./Earth";
 import { Borders } from "./Borders";
 import { Cage, GeoNet, HerePin, IssTrack, Luna, Starfield, Station, SunLight } from "./Extras";
 import { Capital } from "./Capital";
+import { Lakes } from "./Lakes";
 import { Rivers } from "./Rivers";
 
 const HOME_POS = ll2xyz(HOME.lat, HOME.lon, HOME.dist);
@@ -435,6 +436,7 @@ function Scene({
         <Earth atlasTex={atlasTex} />
       </Suspense>
       <Borders countries={countries} />
+      <Lakes />
       <Rivers />
       <Capital />
       <HerePin />

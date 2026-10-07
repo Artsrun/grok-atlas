@@ -197,7 +197,24 @@ async function main() {
   console.log(`countries ${Object.keys(out).length}/${names.length}`);
   console.log(`no capital (${missing.capital.length}):`, missing.capital.join(", ") || "none");
   console.log(`no facts   (${missing.facts.length}):`, missing.facts.join(", ") || "none");
-  console.log(`rivers ${features.length}:`, features.map((f) => f.name).join(", "));
+  const lakesFc = await get(`${NE}/ne_110m_lakes.geojson`);
+  const lakes = [];
+  for (const f of lakesFc.features) {
+    const name = f.properties?.name;
+    const g = f.geometry;
+    if (!name || !g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) continue;
+    const polys = g.type === "MultiPolygon" ? g.coordinates : [g.coordinates];
+    const rings = [];
+    for (const poly of polys) {
+      if (!poly?.[0] || poly[0].length < 4) continue;
+      rings.push(poly[0].map(([lon, lat]) => [round(lon), round(lat)]));
+    }
+    if (rings.length) lakes.push({ name, rings });
+  }
+  lakes.sort((a, b) => a.name.localeCompare(b.name));
+  await writeFile("public/geo/lakes.json", JSON.stringify({ lakes }) + "\n");
+
+  console.log(`rivers ${features.length}:`, features.map((f) => f.name).join(", "));\n  console.log(`lakes ${lakes.length}:`, lakes.map((f) => f.name).join(", "));
 }
 
 main().catch((e) => {
