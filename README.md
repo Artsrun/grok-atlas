@@ -90,6 +90,10 @@ second, not sixty. Both airglow shells share one sphere, coarser below the top
 tier, and the selection wash drops to 1024×512 there — a country tap re-uploads
 a quarter of the texture it used to.
 
+## Patterns
+
+- [Easing Wizard harness](docs/patterns/easing-wizard-harness.md) — two transferable mechanisms (curve surface as primary control; live visual/preview/code triple mirror) extracted for potential use on Atlas HUD / motion / parameter surfaces.
+
 ## Stack
 
 TanStack Start, React 19, Three.js, React Three Fiber, custom Earth shaders, Natural Earth 110m, Zustand, Tailwind v4.

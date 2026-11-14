@@ -13,6 +13,31 @@ Do not add helix, geodesic-volume, or NASA EONET until:
 
 Last feature on `prod`: country vitals (flag, TLD, E.164) — 17 Sep.
 
+## 1 · First-frame measure
+
+Marks fire from `markBoot`:
+
+| mark | stage | meaning |
+| --- | --- | --- |
+| `atlas:gl` | `gl` | first GL clear |
+| `atlas:lit` | `day` | day map on the sphere — freeze number |
+| `atlas:ready` | `night` | day + night |
+
+Read on the phone (Safari console, after the strip leaves):
+
+```js
+window.__atlasMarks
+// { gl: 180, lit: 940, ready: 2100 }  // ms from navigation start
+```
+
+Protocol: `?tier=low`, cold cache, once on 4G and once on Wi-Fi.
+Target to beat later: lit < 1500 on 4G. Do not tune until the table has numbers.
+
+| date | device | net | cache | gl | lit | ready |
+| --- | --- | --- | --- | --- | --- | --- |
+|  | iPhone · `?tier=low` | 4G | cold |  |  |  |
+|  | iPhone · `?tier=low` | wifi | cold |  |  |  |
+
 ## Share surface
 
 - Window: https://grok-atlas.vercel.app/?c=Armenia

@@ -10,6 +10,13 @@ const LABELS: Record<BootStage, string> = {
   atlas: "countries",
 };
 
+/** Navigation-start offsets we care about for the freeze measure. */
+const MARK = {
+  gl: "atlas:gl",
+  day: "atlas:lit",
+  night: "atlas:ready",
+} as const;
+
 type Snap = {
   done: ReadonlySet<BootStage>;
   /** First photoreal frame is on the sphere. */
@@ -20,6 +27,15 @@ type Snap = {
   label: string;
   /** What quietly did not arrive, in the user's terms. Null when all is well. */
   note: string | null;
+};
+
+export type BootMarks = {
+  /** First GL clear. */
+  gl: number | null;
+  /** Day map on the sphere — the freeze number. */
+  lit: number | null;
+  /** Day + night. */
+  ready: number | null;
 };
 
 const done = new Set<BootStage>();
@@ -47,6 +63,48 @@ function makeSnap(): Snap {
   };
 }
 
+function markAt(name: string): number | null {
+  if (typeof performance === "undefined") return null;
+  const e = performance.getEntriesByName(name)[0];
+  return e ? Math.round(e.startTime) : null;
+}
+
+export function bootMarks(): BootMarks {
+  return {
+    gl: markAt(MARK.gl),
+    lit: markAt(MARK.day),
+    ready: markAt(MARK.night),
+  };
+}
+
+function stamp(stage: BootStage) {
+  const name = MARK[stage as keyof typeof MARK];
+  if (!name || typeof performance === "undefined") return;
+  try {
+    if (performance.getEntriesByName(name).length) return;
+    performance.mark(name);
+  } catch {
+    /* jsdom / older webviews */
+  }
+  if (typeof window !== "undefined") {
+    (window as Window & { __atlasMarks?: BootMarks }).__atlasMarks = bootMarks();
+  }
+}
+
+function clearStamps() {
+  if (typeof performance === "undefined") return;
+  for (const name of Object.values(MARK)) {
+    try {
+      performance.clearMarks(name);
+    } catch {
+      /* */
+    }
+  }
+  if (typeof window !== "undefined") {
+    (window as Window & { __atlasMarks?: BootMarks }).__atlasMarks = bootMarks();
+  }
+}
+
 function emit() {
   snap = makeSnap();
   for (const fn of listeners) fn();
@@ -55,12 +113,14 @@ function emit() {
 export function resetBoot() {
   done.clear();
   note = null;
+  clearStamps();
   emit();
 }
 
 export function markBoot(stage: BootStage) {
   if (done.has(stage)) return;
   done.add(stage);
+  stamp(stage);
   emit();
 }
 
@@ -72,6 +132,7 @@ export function markBoot(stage: BootStage) {
 export function failBoot(stage: BootStage, why: string) {
   note = why;
   done.add(stage);
+  stamp(stage);
   emit();
 }
 

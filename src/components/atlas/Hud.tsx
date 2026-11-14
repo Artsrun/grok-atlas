@@ -83,7 +83,7 @@ const LAYER_TIPS: Record<ToggleId, string> = {
   showCage: "Geodesic shell. Chrome, no scale.",
   showGrid: "30° graticule with degree readings.",
   showIss: "Live ZARYA pin, 5 s poll.",
-  showRivers: "Twelve great rivers, running downstream.",
+  showRivers: "Twelve rivers, twenty-four lakes. 110m.",
   showMoon: "Phase disc, declared range.",
   showTides: "P2 lunar + 0.46 solar bulge.",
   cupola: "Window vignette. ISS frame.",

@@ -112,6 +112,20 @@ const WC_ALIAS = {
   Turkey: "Türkiye",
 };
 
+/**
+ * Capitals that moved or were renamed after Natural Earth's places layer was
+ * last updated, keyed by the topology's name. Population is dropped where the
+ * city changed, since NE's figure is for the old one.
+ */
+const CAPITAL_FIX = {
+  // Renamed back from Nur-Sultan, September 2022.
+  Kazakhstan: { capital: "Astana" },
+  // Political capital since 2019; Bujumbura stays the economic one.
+  Burundi: { capital: "Gitega", lat: -3.426, lon: 29.931, capitalPop: null },
+  // Decree-Law 1/2026, January 2026.
+  "Eq. Guinea": { capital: "Ciudad de la Paz", lat: 1.589, lon: 10.822, capitalPop: null },
+};
+
 const norm = (s) =>
   s
     .toLowerCase()
@@ -152,7 +166,8 @@ async function main() {
 
   for (const name of names) {
     const capKey = norm(ADM0_ALIAS[name] ?? name);
-    const cap = caps.get(capKey) ?? caps.get(norm(name));
+    const found = caps.get(capKey) ?? caps.get(norm(name));
+    const cap = found && CAPITAL_FIX[name] ? { ...found, ...CAPITAL_FIX[name] } : found;
     const wcName = name in WC_ALIAS ? WC_ALIAS[name] : name;
     const c = wcName ? (wcByName.get(norm(wcName)) ?? wcByName.get(norm(name))) : null;
     if (!cap) missing.capital.push(name);
@@ -197,7 +212,25 @@ async function main() {
   console.log(`countries ${Object.keys(out).length}/${names.length}`);
   console.log(`no capital (${missing.capital.length}):`, missing.capital.join(", ") || "none");
   console.log(`no facts   (${missing.facts.length}):`, missing.facts.join(", ") || "none");
+  const lakesFc = await get(`${NE}/ne_110m_lakes.geojson`);
+  const lakes = [];
+  for (const f of lakesFc.features) {
+    const name = f.properties?.name;
+    const g = f.geometry;
+    if (!name || !g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) continue;
+    const polys = g.type === "MultiPolygon" ? g.coordinates : [g.coordinates];
+    const rings = [];
+    for (const poly of polys) {
+      if (!poly?.[0] || poly[0].length < 4) continue;
+      rings.push(poly[0].map(([lon, lat]) => [round(lon), round(lat)]));
+    }
+    if (rings.length) lakes.push({ name, rings });
+  }
+  lakes.sort((a, b) => a.name.localeCompare(b.name));
+  await writeFile("public/geo/lakes.json", JSON.stringify({ lakes }) + "\n");
+
   console.log(`rivers ${features.length}:`, features.map((f) => f.name).join(", "));
+  console.log(`lakes ${lakes.length}:`, lakes.map((f) => f.name).join(", "));
 }
 
 main().catch((e) => {
